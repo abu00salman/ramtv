@@ -399,7 +399,7 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func setVolume(_ v: Int) {
         let c = min(200, max(0, v))
         volume = c
-        player.audio.volume = Int32(c)
+        player.audio?.volume = Int32(c)
     }
 
     private func setCString(_ s: String?, apply: (UnsafeMutablePointer<Int8>?) -> Void) {
