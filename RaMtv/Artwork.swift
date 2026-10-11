@@ -43,6 +43,64 @@ enum TitleCleaner {
     }
 }
 
+// MARK: - Display helpers
+
+enum LiveName {
+    static func prefixSplit(_ s: String) -> (prefix: String?, rest: String) {
+        for sep in [":", "|"] {
+            if let r = s.range(of: sep) {
+                let p = String(s[..<r.lowerBound]).trimmed
+                let rest = String(s[r.upperBound...]).trimmed
+                if !p.isEmpty && !rest.isEmpty && p.count <= 24 { return (p, rest) }
+            }
+        }
+        return (nil, s)
+    }
+
+    static func clean(_ s: String) -> String {
+        var t = prefixSplit(s).rest
+        t = t.replacingOccurrences(of: "\\b(4k|uhd|fhd|hd|sd|hevc|h265)\\b", with: " ", options: [.regularExpression, .caseInsensitive])
+        t = t.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmed
+        return t.isEmpty ? s : t
+    }
+}
+
+extension Item {
+    var displayTitle: String {
+        if kind == .live { return LiveName.clean(name) }
+        let t = TitleCleaner.parse(name).title
+        return t.isEmpty ? name : t
+    }
+
+    var year: String? { kind == .live ? nil : TitleCleaner.parse(name).year }
+
+    var badges: [String] {
+        let n = name.lowercased()
+        func has(_ p: String) -> Bool { n.range(of: "\\b(\(p))\\b", options: .regularExpression) != nil }
+        var out: [String] = []
+        if has("4k|uhd") { out.append("4K") }
+        else if has("fhd") { out.append("FHD") }
+        else if has("hd") { out.append("HD") }
+        if has("hevc|h265") { out.append("HEVC") }
+        return out
+    }
+}
+
+struct BadgeRow: View {
+    let item: Item
+    var body: some View {
+        HStack(spacing: 6) {
+            if let y = item.year { Text(y).font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+            ForEach(item.badges, id: \.self) { b in
+                Text(b)
+                    .font(.system(size: 10, weight: .heavy))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+        }
+    }
+}
+
 // MARK: - Channel logo index (iptv-org public database)
 
 @MainActor
@@ -61,9 +119,13 @@ final class LogoIndex {
     func logo(for name: String) async -> (url: String?, cacheable: Bool) {
         await ensureLoaded()
         guard ready else { return (nil, false) }
-        let key = TitleCleaner.normalize(name)
-        if key.isEmpty { return (nil, true) }
-        return (map[key], true)
+        let candidates = [TitleCleaner.normalize(name),
+                          TitleCleaner.normalize(LiveName.prefixSplit(name).rest),
+                          TitleCleaner.normalize(LiveName.clean(name))]
+        for k in candidates where !k.isEmpty {
+            if let u = map[k] { return (u, true) }
+        }
+        return (nil, true)
     }
 
     func reset() {
@@ -144,7 +206,7 @@ final class ArtworkService {
     private var nextSlot = Date.distantPast
 
     private var fileURL: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("artwork.json")
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("artwork2.json")
     }
 
     private var tmdbKey: String { (UserDefaults.standard.string(forKey: "tmdbKey") ?? "").trimmed }
@@ -161,7 +223,7 @@ final class ArtworkService {
     }
 
     private func key(for item: Item) -> String {
-        if item.kind == .live { return "l|" + TitleCleaner.normalize(item.name) }
+        if item.kind == .live { return "l|" + TitleCleaner.normalize(LiveName.clean(item.name)) }
         let p = TitleCleaner.parse(item.name)
         return "\(item.kind.rawValue)|\(p.title.lowercased())|\(p.year ?? "")"
     }
@@ -280,10 +342,10 @@ struct ArtPlaceholder: View {
 
     private var label: String {
         if item.kind == .live {
-            let words = item.name.split(separator: " ").prefix(2)
+            let words = item.displayTitle.split(separator: " ").prefix(2)
             return words.compactMap { $0.first }.map { String($0) }.joined().uppercased()
         }
-        return TitleCleaner.parse(item.name).title
+        return item.displayTitle
     }
 
     var body: some View {

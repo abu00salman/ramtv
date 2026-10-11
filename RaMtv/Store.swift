@@ -15,6 +15,9 @@ final class AppStore: ObservableObject {
     @Published var error: String?
     @Published var nowPlaying: PlayRequest?
     @Published var queue: [Item] = []
+    @Published var epQueue: [Episode] = []
+    var epIndex = 0
+    var epSeries = ""
     var queueIndex = 0
     var lastRequest: PlayRequest?
 
@@ -30,8 +33,14 @@ final class AppStore: ObservableObject {
     }
 
     func bootstrap() async {
-        if items.isEmpty && !sources.isEmpty { await refresh() }
+        guard !sources.isEmpty else { return }
+        let age = Date().timeIntervalSince1970 - defaults.double(forKey: "lastRefresh")
+        if items.isEmpty || age > 6 * 3600 || defaults.integer(forKey: "dataVersion") != 3 {
+            await refresh()
+        }
     }
+
+    var canStep: Bool { queue.count > 1 || epQueue.count > 1 }
 
     var heroItem: Item? {
         recents.first
@@ -78,6 +87,10 @@ final class AppStore: ObservableObject {
         }
         setItems(all)
         saveCache()
+        if error == nil {
+            defaults.set(Date().timeIntervalSince1970, forKey: "lastRefresh")
+            defaults.set(3, forKey: "dataVersion")
+        }
         loading = false
     }
 
@@ -105,7 +118,8 @@ final class AppStore: ObservableObject {
             s = String(s.dropLast(3)) + ".m3u8"
         }
         guard let u = makeURL(s) else { return nil }
-        return PlayRequest(title: item.name, url: u, isLive: item.kind == .live, item: item)
+        return PlayRequest(title: item.displayTitle, url: u, isLive: item.kind == .live, item: item,
+                           resumeKey: item.kind == .live ? nil : item.id)
     }
 
     private func touchRecents(_ item: Item) {
@@ -123,12 +137,20 @@ final class AppStore: ObservableObject {
         } else {
             queue = []
         }
+        epQueue = []
         lastRequest = req
         nowPlaying = req
         touchRecents(item)
     }
 
     func zap(by delta: Int) -> PlayRequest? {
+        if !epQueue.isEmpty {
+            let n = epIndex + delta
+            guard epQueue.indices.contains(n), let r = episodeRequest(epQueue[n]) else { return nil }
+            epIndex = n
+            lastRequest = r
+            return r
+        }
         guard !queue.isEmpty else { return nil }
         queueIndex = (queueIndex + delta + queue.count) % queue.count
         return startQueued(queue[queueIndex])
@@ -146,10 +168,18 @@ final class AppStore: ObservableObject {
         return r
     }
 
-    func play(episode: Episode) {
-        guard let u = makeURL(episode.url) else { return }
+    private func episodeRequest(_ e: Episode) -> PlayRequest? {
+        guard let u = makeURL(e.url) else { return nil }
+        let label = epSeries.isEmpty ? e.title : "\(epSeries) S\(e.season)E\(e.number)"
+        return PlayRequest(title: label, url: u, isLive: false, item: nil, resumeKey: "ep|\(e.id)", isEpisode: true)
+    }
+
+    func play(episode: Episode, in list: [Episode], series: String) {
         queue = []
-        let r = PlayRequest(title: episode.title, url: u)
+        epQueue = list
+        epIndex = list.firstIndex(of: episode) ?? 0
+        epSeries = series
+        guard let r = episodeRequest(episode) else { return }
         lastRequest = r
         nowPlaying = r
     }

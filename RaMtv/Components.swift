@@ -13,8 +13,19 @@ struct PosterCard: View {
             ArtThumb(item: item, fit: item.kind == .live)
                 .frame(width: width, height: height)
                 .background(Color.white.opacity(0.08))
+                .overlay(alignment: .bottom) {
+                    if item.kind != .live, let f = ResumeStore.fraction(item.id) {
+                        GeometryReader { g in
+                            ZStack(alignment: .leading) {
+                                Rectangle().fill(Color.black.opacity(0.5))
+                                Rectangle().fill(Color.ram).frame(width: g.size.width * f)
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            Text(item.name)
+            Text(item.displayTitle)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
                 .frame(width: width, alignment: .leading)
@@ -66,12 +77,23 @@ struct HeroView: View {
             LinearGradient(colors: [Color.ram.opacity(0.6), Color(white: 0.04)],
                            startPoint: .topTrailing, endPoint: .bottomLeading)
             Color.clear
-                .overlay { ArtThumb(item: item, fit: item.kind == .live) }
+                .overlay {
+                    if item.kind == .live {
+                        ArtThumb(item: item, fit: true)
+                            .frame(width: 240, height: 140)
+                            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                            .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
+                            .offset(y: -30)
+                    } else {
+                        ArtThumb(item: item)
+                    }
+                }
                 .clipped()
             LinearGradient(colors: [.clear, .black.opacity(0.92)], startPoint: .center, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 10) {
                 Text(label).font(.caption.weight(.bold)).foregroundStyle(.secondary).textCase(.uppercase)
-                Text(item.name).font(.largeTitle.weight(.heavy)).lineLimit(2)
+                Text(item.displayTitle).font(.largeTitle.weight(.heavy)).lineLimit(2)
+                BadgeRow(item: item)
                 HStack(spacing: 12) {
                     Button { store.play(item) } label: {
                         Label(t("Play"), systemImage: "play.fill")

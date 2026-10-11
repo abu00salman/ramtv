@@ -3,7 +3,7 @@ import Foundation
 private let arabic: [String: String] = [
     "Home": "الرئيسية", "Live": "مباشر", "Library": "المكتبة", "Search": "بحث", "Settings": "الإعدادات",
     "Movies": "أفلام", "Series": "مسلسلات", "All": "الكل", "Favorites": "المفضلة",
-    "Continue Watching": "متابعة المشاهدة", "Play": "تشغيل", "Add Source": "إضافة مصدر",
+    "Continue Watching": "متابعة المشاهدة", "Recent Channels": "قنوات شاهدتها مؤخراً", "Play": "تشغيل", "Add Source": "إضافة مصدر",
     "Try Demo": "تجربة العرض التجريبي", "Sources": "المصادر", "Refresh": "تحديث",
     "Name": "الاسم", "Username": "اسم المستخدم", "Password": "كلمة المرور", "Save": "حفظ",
     "Cancel": "إلغاء", "Season": "الموسم", "About": "حول", "Demo": "تجريبي",

@@ -55,6 +55,8 @@ struct PlayRequest: Identifiable {
     let url: URL
     var isLive: Bool = false
     var item: Item? = nil
+    var resumeKey: String? = nil
+    var isEpisode: Bool = false
 }
 
 // MARK: - Keychain (with UserDefaults fallback for sideloaded builds)
@@ -134,7 +136,29 @@ enum M3UParser {
                 pendingGroup = "Other"
             }
         }
-        return items
+        return autoGroup(items)
+    }
+
+    /// Playlists without group-title: derive groups from the name prefix ("STC TV: ...") or first word.
+    private static func autoGroup(_ items: [Item]) -> [Item] {
+        var out = items
+        var counts: [String: Int] = [:]
+        var display: [String: String] = [:]
+        var cand: [Int: String] = [:]
+        for (i, it) in items.enumerated() where it.group == "Other" && it.kind == .live {
+            let sp = LiveName.prefixSplit(it.name)
+            let c = (sp.prefix ?? String(it.name.split(separator: " ").first ?? "")).trimmed
+            let k = c.lowercased()
+            if k.count >= 2 {
+                cand[i] = k
+                counts[k, default: 0] += 1
+                if display[k] == nil { display[k] = c }
+            }
+        }
+        for (i, k) in cand where (counts[k] ?? 0) >= 3 {
+            out[i].group = display[k] ?? k
+        }
+        return out
     }
 
     private static func attr(_ key: String, in line: String) -> String? {

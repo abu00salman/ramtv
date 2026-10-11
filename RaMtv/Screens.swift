@@ -44,7 +44,8 @@ struct HomeView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 26) {
                         if let hero = store.heroItem { HeroView(item: hero) }
-                        ShelfView(title: t("Continue Watching"), items: store.recents)
+                        ShelfView(title: t("Continue Watching"), items: store.recents.filter { $0.kind != .live })
+                        ShelfView(title: t("Recent Channels"), items: store.recents.filter { $0.kind == .live })
                         ShelfView(title: t("Favorites"), items: store.favorites.isEmpty ? [] : store.favoriteItems)
                         ShelfView(title: t("Movies"), items: Array(store.movies.prefix(24)))
                         ShelfView(title: t("Series"), items: Array(store.series.prefix(24)))
@@ -74,7 +75,15 @@ struct ChannelRow: View {
                 .frame(width: 64, height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name).font(.body.weight(.semibold)).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(item.displayTitle).font(.body.weight(.semibold)).lineLimit(1)
+                    ForEach(item.badges, id: \.self) { b in
+                        Text(b)
+                            .font(.system(size: 10, weight: .heavy))
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                }
                 Text(item.group).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
@@ -201,7 +210,10 @@ struct SeriesDetailView: View {
                     ArtThumb(item: item)
                         .frame(width: 90, height: 135)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    Text(item.name).font(.title2.bold())
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.displayTitle).font(.title2.bold())
+                        BadgeRow(item: item)
+                    }
                 }
                 .listRowBackground(Color.clear)
             }
@@ -213,7 +225,7 @@ struct SeriesDetailView: View {
             ForEach(seasons, id: \.self) { s in
                 Section("\(t("Season")) \(s)") {
                     ForEach(episodes.filter { $0.season == s }) { e in
-                        Button { store.play(episode: e) } label: {
+                        Button { store.play(episode: e, in: episodes, series: item.displayTitle) } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "play.circle.fill").foregroundStyle(Color.ram)
                                 Text("\(e.number). \(e.title)").lineLimit(2)
@@ -227,7 +239,7 @@ struct SeriesDetailView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.black)
-        .navigationTitle(item.name)
+        .navigationTitle(item.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             episodes = await store.episodes(for: item)
@@ -269,7 +281,7 @@ struct SearchView: View {
                 .frame(width: 52, height: 52)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name).lineLimit(1)
+                Text(item.displayTitle).lineLimit(1)
                 Text(item.group).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
