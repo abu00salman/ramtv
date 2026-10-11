@@ -501,8 +501,8 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             self.durationText = self.player.media?.length.stringValue ?? ""
             if !self.message.isEmpty && self.player.isPlaying { self.message = "" }
 
-            let secs = Double(self.player.time.intValue) / 1000
-            let dur = Double(self.player.media?.length.intValue ?? 0) / 1000
+            let secs = Double(self.player.time.value?.intValue ?? 0) / 1000
+            let dur = Double(self.player.media?.length.value?.intValue ?? 0) / 1000
 
             if !self.didResume && self.seekable && dur > 0 {
                 self.didResume = true
