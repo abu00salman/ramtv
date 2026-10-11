@@ -97,7 +97,11 @@ final class AppStore: ObservableObject {
     // MARK: Playback
 
     func play(_ item: Item) {
-        guard let s = item.url, let u = makeURL(s) else { return }
+        guard var s = item.url else { return }
+        if item.kind == .live, s.contains("/live/"), s.hasSuffix(".ts") {
+            s = String(s.dropLast(3)) + ".m3u8"
+        }
+        guard let u = makeURL(s) else { return }
         nowPlaying = PlayRequest(title: item.name, url: u)
         recents.removeAll { $0.id == item.id }
         recents.insert(item, at: 0)
