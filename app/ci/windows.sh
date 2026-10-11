@@ -2,9 +2,21 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bash ci/prepare.sh windows
-flutter build windows --release
-mkdir -p ../dist
-REL=$(find build/windows -type d -name Release | head -1)
+
+set +e
+flutter build windows --release --dart-define=TMDB_KEY="${TMDB_KEY:-}" 2>&1 | tee build.log
+st=${PIPESTATUS[0]}
+set -e
+if [ "$st" -ne 0 ]; then bash ci/report_errors.sh build.log; exit "$st"; fi
+
+PY=$(command -v python3 || command -v python)
+REL=$(find build/windows -type d -path "*runner/Release" | head -1)
+test -f "$REL/ramtv.exe" || { echo "::error::ramtv.exe not found in $REL"; ls -R build/windows | head -40; exit 1; }
 echo "Release folder: $REL"
-powershell -NoProfile -Command "Compress-Archive -Path '$REL/*' -DestinationPath '../dist/RaM-tv-Windows-x64.zip' -Force"
+mkdir -p ../dist
+"$PY" - "$REL" ../dist/RaM-tv-Windows-x64 <<'PYEOF'
+import sys, shutil
+shutil.make_archive(sys.argv[2], "zip", sys.argv[1])
+PYEOF
+test -f ../dist/RaM-tv-Windows-x64.zip || { echo "::error::Windows zip was not created"; exit 1; }
 ls -la ../dist

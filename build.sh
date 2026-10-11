@@ -1,6 +1,10 @@
 #!/bin/bash
 set -o pipefail
 
+if [ -n "${TMDB_KEY:-}" ]; then
+  printf 'let builtInTMDBKey = "%s"\n' "$TMDB_KEY" > RaMtv/BuiltInKey.swift
+fi
+
 xcodegen generate
 pod install
 
@@ -16,6 +20,7 @@ set -e
 if [ $status -ne 0 ]; then
   echo "=================== COMPILER ERRORS ==================="
   grep -E "error:" build.log | sort -u | head -40
+  grep -E "error:" build.log | sort -u | head -10 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
   echo "======================================================="
   exit $status
 fi

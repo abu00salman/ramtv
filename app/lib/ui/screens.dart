@@ -653,7 +653,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             for (final s in store.sources)
               ListTile(
                 title: Text(s.name),
-                subtitle: Text(s.type == 'demo' ? t('Demo') : s.url, maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(s.type == 'demo' ? t('Demo') : _maskUrl(s.url), maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline_rounded),
                   onPressed: () => store.removeSource(s.id),
@@ -703,6 +703,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: const TextStyle(fontSize: 12, color: Colors.white54),
             ),
             const SizedBox(height: 8),
+            const Text('This product uses the TMDB API but is not endorsed or certified by TMDB.',
+                style: TextStyle(fontSize: 11, color: Colors.white38)),
+            const SizedBox(height: 8),
             const Text('RaM tv  1.0', style: TextStyle(color: Colors.white54)),
           ],
         ),
@@ -710,6 +713,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
+
+String _maskUrl(String u) => u.replaceAllMapped(
+    RegExp(r'(password|pass|pwd)=([^&]+)', caseSensitive: false), (m) => '${m.group(1)}=••••');
 
 Future<void> showAddSource(BuildContext context) {
   return showDialog<void>(context: context, builder: (_) => const _AddSourceDialog());
