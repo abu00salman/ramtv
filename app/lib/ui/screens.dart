@@ -1,9 +1,13 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../artwork.dart';
 import '../models.dart';
 import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
+import '../lan_add.dart';
+import 'dpad.dart';
 import 'player.dart';
 import 'widgets.dart';
 
@@ -282,7 +286,7 @@ class _LiveScreenState extends State<LiveScreen> {
                     ? Center(child: Text(t('No channels'), style: const TextStyle(color: Colors.white54)))
                     : ListView.builder(
                         itemCount: list.length,
-                        itemExtent: 76,
+                        itemExtent: isWide(context) ? 92 : 76,
                         itemBuilder: (_, i) => ChannelRow(
                           item: list[i],
                           onTap: () => openItem(context, list[i], list: list),
@@ -304,6 +308,7 @@ class ChannelRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final big = isWide(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Pressable(
@@ -313,8 +318,8 @@ class ChannelRow extends StatelessWidget {
           child: Row(
             children: [
               SizedBox(
-                width: 64,
-                height: 44,
+                width: big ? 84 : 64,
+                height: big ? 58 : 44,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: ArtThumb(item: item, fit: true),
@@ -332,7 +337,7 @@ class ChannelRow extends StatelessWidget {
                           child: Text(item.displayTitle,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                              style: TextStyle(fontWeight: FontWeight.w600, fontSize: big ? 19 : 16)),
                         ),
                         const SizedBox(width: 6),
                         for (final b in item.badges)
@@ -569,7 +574,7 @@ class _SearchScreenState extends State<SearchScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
-            child: TextField(
+            child: DpadTextField(
               controller: _c,
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
@@ -675,7 +680,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 16),
             Text(t('Artwork'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
             const SizedBox(height: 8),
-            TextField(
+            DpadTextField(
               controller: _tmdb,
               onChanged: (v) => store.prefs.setString('tmdbKey', v.trim()),
               decoration: const InputDecoration(
@@ -723,9 +728,29 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
   final _url = TextEditingController();
   final _user = TextEditingController();
   final _pass = TextEditingController();
+  final LanAddServer _lan = LanAddServer();
+  String? _lanUrl;
+  bool _lanStarted = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tvLike =
+        defaultTargetPlatform == TargetPlatform.android && MediaQuery.of(context).size.width >= 900;
+    if (tvLike && !_lanStarted) {
+      _lanStarted = true;
+      _lan.onAdded = () {
+        if (mounted) Navigator.of(context).pop();
+      };
+      _lan.start().then((u) {
+        if (mounted) setState(() => _lanUrl = u);
+      });
+    }
+  }
 
   @override
   void dispose() {
+    _lan.stop();
     _name.dispose();
     _url.dispose();
     _user.dispose();
@@ -737,43 +762,103 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
       _url.text.trim().isNotEmpty &&
       (_type == 'm3u' || (_user.text.trim().isNotEmpty && _pass.text.isNotEmpty));
 
+  void _save() {
+    if (!_valid) return;
+    final fallback = _type == 'm3u' ? 'Playlist' : 'Server';
+    store.addSource(Source(
+      id: store.newId(),
+      name: _name.text.trim().isEmpty ? fallback : _name.text.trim(),
+      type: _type,
+      url: _url.text.trim(),
+      username: _user.text.trim(),
+      password: _pass.text,
+    ));
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(t('Add Source')),
       content: SizedBox(
-        width: 420,
+        width: 460,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'm3u', label: Text('M3U')),
-                  ButtonSegment(value: 'xtream', label: Text('Xtream')),
-                ],
-                selected: {_type},
-                onSelectionChanged: (s) => setState(() => _type = s.first),
+              if (_lanUrl != null) ...[
+                Text(t('Add from your phone'),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.all(6),
+                      child: QrImageView(data: _lanUrl!, size: 120, backgroundColor: Colors.white),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_lanUrl!,
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 6),
+                          Text('PIN: ${_lan.pin}',
+                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 6),
+                          Text(
+                            t('Scan the code or open the address in your phone browser (same Wi-Fi). Enter the PIN shown here.'),
+                            style: const TextStyle(fontSize: 12, color: Colors.white60),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(height: 28),
+                Text(t('Or type it here'), style: const TextStyle(color: Colors.white60)),
+                const SizedBox(height: 8),
+              ],
+              Center(
+                child: SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'm3u', label: Text('M3U')),
+                    ButtonSegment(value: 'xtream', label: Text('Xtream')),
+                  ],
+                  selected: {_type},
+                  onSelectionChanged: (s) => setState(() => _type = s.first),
+                ),
               ),
               const SizedBox(height: 12),
-              TextField(controller: _name, decoration: InputDecoration(labelText: t('Name'))),
-              TextField(
+              DpadTextField(
+                controller: _name,
+                decoration: InputDecoration(labelText: t('Name')),
+                textInputAction: TextInputAction.next,
+              ),
+              DpadTextField(
                 controller: _url,
                 onChanged: (_) => setState(() {}),
                 keyboardType: TextInputType.url,
+                textInputAction: _type == 'm3u' ? TextInputAction.done : TextInputAction.next,
                 decoration: InputDecoration(
                     labelText: _type == 'm3u' ? t('Playlist URL') : t('Server URL')),
               ),
               if (_type == 'xtream') ...[
-                TextField(
+                DpadTextField(
                   controller: _user,
                   onChanged: (_) => setState(() {}),
+                  textInputAction: TextInputAction.next,
                   decoration: InputDecoration(labelText: t('Username')),
                 ),
-                TextField(
+                DpadTextField(
                   controller: _pass,
                   onChanged: (_) => setState(() {}),
                   obscureText: true,
+                  textInputAction: TextInputAction.done,
                   decoration: InputDecoration(labelText: t('Password')),
                 ),
               ],
@@ -783,23 +868,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t('Cancel'))),
-        FilledButton(
-          onPressed: _valid
-              ? () {
-                  final fallback = _type == 'm3u' ? 'Playlist' : 'Server';
-                  store.addSource(Source(
-                    id: store.newId(),
-                    name: _name.text.trim().isEmpty ? fallback : _name.text.trim(),
-                    type: _type,
-                    url: _url.text.trim(),
-                    username: _user.text.trim(),
-                    password: _pass.text,
-                  ));
-                  Navigator.of(context).pop();
-                }
-              : null,
-          child: Text(t('Save')),
-        ),
+        FilledButton(onPressed: _valid ? _save : null, child: Text(t('Save'))),
       ],
     );
   }

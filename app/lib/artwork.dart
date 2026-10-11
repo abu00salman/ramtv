@@ -13,44 +13,67 @@ class ArtRes {
   const ArtRes(this.url, this.cacheable);
 }
 
+final RegExp _objRe = RegExp(r'\{[^{}]*\}');
+final RegExp _chanRe = RegExp(r'"channel"\s*:\s*"((?:[^"\\]|\\.)*)"');
+final RegExp _urlRe = RegExp(r'"url"\s*:\s*"((?:[^"\\]|\\.)*)"');
+final RegExp _wRe = RegExp(r'"width"\s*:\s*(\d+)');
+final RegExp _hRe = RegExp(r'"height"\s*:\s*(\d+)');
+final RegExp _idRe = RegExp(r'"id"\s*:\s*"((?:[^"\\]|\\.)*)"');
+final RegExp _nameRe = RegExp(r'"name"\s*:\s*"((?:[^"\\]|\\.)*)"');
+final RegExp _altRe = RegExp(r'"alt_names"\s*:\s*\[([^\]]*)\]');
+final RegExp _logoRe = RegExp(r'"logo"\s*:\s*"((?:[^"\\]|\\.)*)"');
+
+String _un(String s) {
+  if (!s.contains('\\')) return s;
+  try {
+    return jsonDecode('"$s"') as String;
+  } catch (_) {
+    return s;
+  }
+}
+
 /// Builds normalized-name -> logo URL from the public iptv-org database.
+/// Uses regex scanning (not a full JSON parse) to keep memory low on weak TV boxes.
 Map<String, String> buildLogoIndex(List<String> bodies) {
-  final channels = jsonDecode(bodies[0]);
-  final logos = jsonDecode(bodies[1]);
   final best = <String, MapEntry<String, int>>{};
-  if (logos is List) {
-    for (final l in logos) {
-      if (l is! Map) continue;
-      final id = l['channel'];
-      final url = l['url'];
-      if (id is! String || url is! String) continue;
-      final w = (l['width'] as num?)?.toInt() ?? 0;
-      final h = (l['height'] as num?)?.toInt() ?? 0;
-      final area = w * h;
-      final cur = best[id];
-      if (cur != null && cur.value >= area) continue;
-      best[id] = MapEntry(url, area);
-    }
+  for (final m in _objRe.allMatches(bodies[1])) {
+    final o = m.group(0)!;
+    final id = _chanRe.firstMatch(o)?.group(1);
+    final url = _urlRe.firstMatch(o)?.group(1);
+    if (id == null || url == null) continue;
+    final w = int.tryParse(_wRe.firstMatch(o)?.group(1) ?? '') ?? 0;
+    final h = int.tryParse(_hRe.firstMatch(o)?.group(1) ?? '') ?? 0;
+    final key = _un(id);
+    final area = w * h;
+    final cur = best[key];
+    if (cur != null && cur.value >= area) continue;
+    best[key] = MapEntry(_un(url), area);
   }
   final out = <String, String>{};
-  if (channels is List) {
-    for (final c in channels) {
-      if (c is! Map) continue;
-      final id = c['id'];
-      if (id is! String) continue;
-      final u = best[id]?.key ?? (c['logo'] as String?);
-      if (u == null || u.isEmpty) continue;
-      final names = <String>[(c['name'] as String?) ?? ''];
-      final alt = c['alt_names'];
-      if (alt is List) {
-        for (final a in alt) {
-          if (a is String) names.add(a);
+  for (final m in _objRe.allMatches(bodies[0])) {
+    final o = m.group(0)!;
+    final id = _idRe.firstMatch(o)?.group(1);
+    if (id == null) continue;
+    final logoRaw = _logoRe.firstMatch(o)?.group(1);
+    final u = best[_un(id)]?.key ?? (logoRaw == null ? null : _un(logoRaw));
+    if (u == null || u.isEmpty) continue;
+    final names = <String>[];
+    final nm = _nameRe.firstMatch(o)?.group(1);
+    if (nm != null) names.add(_un(nm));
+    final alt = _altRe.firstMatch(o)?.group(1);
+    if (alt != null && alt.trim().isNotEmpty) {
+      try {
+        final l = jsonDecode('[$alt]');
+        if (l is List) {
+          for (final a in l) {
+            if (a is String) names.add(a);
+          }
         }
-      }
-      for (final n in names) {
-        final k = TitleCleaner.normalize(n);
-        if (k.isNotEmpty) out.putIfAbsent(k, () => u);
-      }
+      } catch (_) {}
+    }
+    for (final n in names) {
+      final k = TitleCleaner.normalize(n);
+      if (k.isNotEmpty) out.putIfAbsent(k, () => u);
     }
   }
   return out;

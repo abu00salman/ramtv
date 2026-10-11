@@ -18,6 +18,7 @@ dependencies:
   shared_preferences: ^2.2.2
   path_provider: ^2.1.2
   wakelock_plus: ^1.2.4
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.1

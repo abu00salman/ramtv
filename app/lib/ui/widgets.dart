@@ -36,13 +36,17 @@ class _PressableState extends State<Pressable> {
               duration: const Duration(milliseconds: 150), alignment: 0.5);
         }
       },
-      child: AnimatedContainer(
+      child: AnimatedScale(
+        scale: _focused ? 1.04 : 1.0,
         duration: const Duration(milliseconds: 120),
-        foregroundDecoration: BoxDecoration(
-          borderRadius: r,
-          border: Border.all(color: _focused ? Colors.white : Colors.transparent, width: 3),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          foregroundDecoration: BoxDecoration(
+            borderRadius: r,
+            border: Border.all(color: _focused ? Colors.white : Colors.transparent, width: 3),
+          ),
+          child: widget.child,
         ),
-        child: widget.child,
       ),
     );
   }
@@ -102,7 +106,8 @@ class ArtPlaceholder extends StatelessWidget {
 class ArtThumb extends StatefulWidget {
   final Item item;
   final bool fit;
-  const ArtThumb({super.key, required this.item, this.fit = false});
+  final int cacheWidth;
+  const ArtThumb({super.key, required this.item, this.fit = false, this.cacheWidth = 400});
 
   @override
   State<ArtThumb> createState() => _ArtThumbState();
@@ -143,7 +148,7 @@ class _ArtThumbState extends State<ArtThumb> {
     return Image.network(
       url,
       fit: widget.fit ? BoxFit.contain : BoxFit.cover,
-      cacheWidth: 400,
+      cacheWidth: widget.cacheWidth,
       frameBuilder: (ctx, child, frame, sync) {
         if (frame == null && !sync) return placeholder;
         if (widget.fit) {
@@ -248,7 +253,7 @@ class Shelf extends StatelessWidget {
     final scale = isWide(context) ? 1.35 : 1.0;
     final live = items.first.kind == Kind.live;
     final w = (live ? 180.0 : 124.0) * scale;
-    final h = (live ? 150.0 : 232.0) * scale;
+    final h = (live ? 162.0 : 244.0) * scale;
     return Padding(
       padding: const EdgeInsets.only(bottom: 22),
       child: Column(
@@ -263,7 +268,7 @@ class Shelf extends StatelessWidget {
             height: h,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (_, i) =>
@@ -323,7 +328,7 @@ class HeroBanner extends StatelessWidget {
               ),
             )
           else
-            ArtThumb(item: item),
+            ArtThumb(item: item, cacheWidth: 900),
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(

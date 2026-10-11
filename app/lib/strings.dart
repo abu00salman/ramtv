@@ -47,6 +47,9 @@ const Map<String, String> _ar = {
   'Stream unavailable. Check your connection or try another channel.':
       'البث غير متاح. تحقق من الاتصال أو جرّب قناة أخرى.',
   'Artwork': 'الصور',
+  'Add from your phone': 'أضف من جوالك',
+  'Scan the code or open the address in your phone browser (same Wi-Fi). Enter the PIN shown here.': 'امسح الرمز أو افتح العنوان في متصفح جوالك (نفس الواي فاي) وأدخل رمز PIN الظاهر هنا.',
+  'Or type it here': 'أو اكتبها هنا',
   'Clear artwork cache': 'مسح ذاكرة الصور',
 };
 
