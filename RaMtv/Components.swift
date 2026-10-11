@@ -1,27 +1,6 @@
 import SwiftUI
 import AVKit
 
-struct Thumb: View {
-    let url: String?
-    var fit = false
-    var icon = "play.tv"
-
-    var body: some View {
-        AsyncImage(url: url.flatMap { makeURL($0) }) { phase in
-            switch phase {
-            case .success(let img):
-                if fit {
-                    img.resizable().scaledToFit().padding(8)
-                } else {
-                    img.resizable().scaledToFill()
-                }
-            default:
-                Image(systemName: icon).font(.title2).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 struct PosterCard: View {
     @EnvironmentObject var store: AppStore
     let item: Item
@@ -31,7 +10,7 @@ struct PosterCard: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Thumb(url: item.logo, fit: item.kind == .live, icon: item.kind == .live ? "tv" : "film")
+            ArtThumb(item: item, fit: item.kind == .live)
                 .frame(width: width, height: height)
                 .background(Color.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -87,7 +66,7 @@ struct HeroView: View {
             LinearGradient(colors: [Color.ram.opacity(0.6), Color(white: 0.04)],
                            startPoint: .topTrailing, endPoint: .bottomLeading)
             Color.clear
-                .overlay { Thumb(url: item.logo, fit: item.kind == .live, icon: "play.tv.fill").opacity(0.95) }
+                .overlay { ArtThumb(item: item, fit: item.kind == .live) }
                 .clipped()
             LinearGradient(colors: [.clear, .black.opacity(0.92)], startPoint: .center, endPoint: .bottom)
             VStack(alignment: .leading, spacing: 10) {

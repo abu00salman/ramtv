@@ -14,6 +14,9 @@ final class AppStore: ObservableObject {
     @Published var loading = false
     @Published var error: String?
     @Published var nowPlaying: PlayRequest?
+    @Published var queue: [Item] = []
+    var queueIndex = 0
+    var lastRequest: PlayRequest?
 
     private let defaults = UserDefaults.standard
 
@@ -96,22 +99,59 @@ final class AppStore: ObservableObject {
 
     // MARK: Playback
 
-    func play(_ item: Item) {
-        guard var s = item.url else { return }
+    private func makeRequest(_ item: Item) -> PlayRequest? {
+        guard var s = item.url else { return nil }
         if item.kind == .live, s.contains("/live/"), s.hasSuffix(".ts") {
             s = String(s.dropLast(3)) + ".m3u8"
         }
-        guard let u = makeURL(s) else { return }
-        nowPlaying = PlayRequest(title: item.name, url: u)
+        guard let u = makeURL(s) else { return nil }
+        return PlayRequest(title: item.name, url: u, isLive: item.kind == .live, item: item)
+    }
+
+    private func touchRecents(_ item: Item) {
         recents.removeAll { $0.id == item.id }
         recents.insert(item, at: 0)
         if recents.count > 20 { recents.removeLast(recents.count - 20) }
         if let d = try? JSONEncoder().encode(recents) { defaults.set(d, forKey: "recents") }
     }
 
+    func play(_ item: Item, in list: [Item]? = nil) {
+        guard let req = makeRequest(item) else { return }
+        if item.kind == .live {
+            queue = list ?? live.filter { $0.group == item.group }
+            queueIndex = queue.firstIndex(where: { $0.id == item.id }) ?? 0
+        } else {
+            queue = []
+        }
+        lastRequest = req
+        nowPlaying = req
+        touchRecents(item)
+    }
+
+    func zap(by delta: Int) -> PlayRequest? {
+        guard !queue.isEmpty else { return nil }
+        queueIndex = (queueIndex + delta + queue.count) % queue.count
+        return startQueued(queue[queueIndex])
+    }
+
+    func jump(to item: Item) -> PlayRequest? {
+        if let i = queue.firstIndex(where: { $0.id == item.id }) { queueIndex = i }
+        return startQueued(item)
+    }
+
+    private func startQueued(_ item: Item) -> PlayRequest? {
+        guard let r = makeRequest(item) else { return nil }
+        lastRequest = r
+        touchRecents(item)
+        return r
+    }
+
     func play(episode: Episode) {
         guard let u = makeURL(episode.url) else { return }
-        nowPlaying = PlayRequest(title: episode.title, url: u)
+        queue = []
+        let r = PlayRequest(title: episode.title, url: u)
+        lastRequest = r
+        nowPlaying = r
     }
 
     func isFavorite(_ item: Item) -> Bool { favorites.contains(item.id) }

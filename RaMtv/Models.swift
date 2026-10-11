@@ -53,6 +53,8 @@ struct PlayRequest: Identifiable {
     let id = UUID()
     let title: String
     let url: URL
+    var isLive: Bool = false
+    var item: Item? = nil
 }
 
 // MARK: - Keychain (with UserDefaults fallback for sideloaded builds)

@@ -24,6 +24,12 @@ struct RootView: View {
         }
         .fullScreenCover(item: $store.nowPlaying) { PlayerScreen(req: $0) }
         .task { await store.bootstrap() }
+        .onAppear {
+            let s = store
+            PlayerHub.shared.onRestore = { [weak s] in
+                Task { @MainActor in s?.nowPlaying = s?.lastRequest }
+            }
+        }
     }
 }
 
@@ -60,12 +66,12 @@ struct HomeView: View {
 struct ChannelRow: View {
     @EnvironmentObject var store: AppStore
     let item: Item
+    let onTap: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            Thumb(url: item.logo, fit: true, icon: "tv")
+            ArtThumb(item: item, fit: true)
                 .frame(width: 64, height: 44)
-                .background(Color.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.body.weight(.semibold)).lineLimit(1)
@@ -79,7 +85,7 @@ struct ChannelRow: View {
             .buttonStyle(.borderless)
         }
         .contentShape(Rectangle())
-        .onTapGesture { store.play(item) }
+        .onTapGesture { onTap() }
     }
 }
 
@@ -119,7 +125,10 @@ struct LiveView: View {
                     .padding(.horizontal, 16)
                 }
                 .frame(height: 52)
-                List(filtered) { ChannelRow(item: $0).listRowBackground(Color.clear) }
+                List(filtered) { item in
+                    ChannelRow(item: item) { store.play(item, in: filtered) }
+                        .listRowBackground(Color.clear)
+                }
                     .listStyle(.plain)
                     .overlay { if store.live.isEmpty { Text(t("No channels")).foregroundStyle(.secondary) } }
             }
@@ -189,9 +198,8 @@ struct SeriesDetailView: View {
         List {
             Section {
                 HStack(spacing: 14) {
-                    Thumb(url: item.logo, icon: "film")
+                    ArtThumb(item: item)
                         .frame(width: 90, height: 135)
-                        .background(Color.white.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     Text(item.name).font(.title2.bold())
                 }
@@ -257,9 +265,8 @@ struct SearchView: View {
 
     private func row(_ item: Item) -> some View {
         HStack(spacing: 12) {
-            Thumb(url: item.logo, fit: item.kind == .live, icon: item.kind == .live ? "tv" : "film")
+            ArtThumb(item: item, fit: item.kind == .live)
                 .frame(width: 52, height: 52)
-                .background(Color.white.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).lineLimit(1)
@@ -272,6 +279,7 @@ struct SearchView: View {
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
     @State private var showAdd = false
+    @AppStorage("tmdbKey") private var tmdbKey = ""
 
     var body: some View {
         NavigationStack {
@@ -295,6 +303,16 @@ struct SettingsView: View {
                 }
                 if let e = store.error {
                     Section { Text(e).font(.footnote).foregroundStyle(.red) }
+                }
+                Section {
+                    TextField("TMDB API key (optional)", text: $tmdbKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Clear artwork cache") { ArtworkService.shared.clear() }
+                } header: {
+                    Text("Artwork")
+                } footer: {
+                    Text("Posters and channel logos are fetched automatically. For best movie and series posters, add a free API key from themoviedb.org (Settings > API), then restart the app.")
                 }
                 Section(t("About")) {
                     Text(t("RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access."))
