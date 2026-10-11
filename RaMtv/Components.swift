@@ -147,6 +147,161 @@ struct EmptyStateView: View {
     }
 }
 
+final class PlayerModel: ObservableObject {
+    let player: AVPlayer
+    @Published var message = ""
+    @Published var failed = false
+    private var obs: NSKeyValueObservation?
+
+    init(url: URL) {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "RaMtv/1.0"]])
+        let item = AVPlayerItem(asset: asset)
+        player = AVPlayer(playerItem: item)
+        player.allowsExternalPlayback = true
+        message = "Loading..."
+        obs = item.observe(\.status, options: [.new]) { [weak self] it, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch it.status {
+                case .readyToPlay:
+                    self.message = ""
+                    self.failed = false
+                case .failed:
+                    let ns = it.error as NSError?
+                    var text = ns?.localizedDescription ?? "Playback failed"
+                    if let ns = ns { text += "\n[\(ns.domain) \(ns.code)]" }
+                    if let ev = it.errorLog()?.events.last {
+                        text += "\nHTTP \(ev.errorStatusCode) \(ev.errorComment ?? "")"
+                    }
+                    text += "\n" + (url.pathExtension.isEmpty ? "(no ext)" : ".\(url.pathExtension)") + " @ " + (url.host ?? "")
+                    self.message = text
+                    self.failed = true
+                default: break
+                }
+            }
+        }
+        player.play()
+    }
+
+    deinit { player.pause() }
+}
+
+struct PlayerScreen: View {
+    let req: PlayRequest
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var model: PlayerModel
+
+    init(req: PlayRequest) {
+        self.req = req
+        _model = StateObject(wrappedValue: PlayerModel(url: req.url))
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            AVPlayerView(player: model.player).ignoresSafeArea()
+            if !model.message.isEmpty {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 10) {
+                        if !model.failed { ProgressView() }
+                        Text(model.message)
+                            .font(.footnote)
+                            .foregroundStyle(model.failed ? Color.red : Color.white)
+                            .textSelection(.enabled)
+                    }
+                    .padding(14)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 90)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.headline)
+                    .frame(width: 40, height: 40)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(16)
+        }
+    }
+}
+
+struct AVPlayerView: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        vc.player = player
+        vc.allowsPictureInPicturePlayback = true
+        vc.canStartPictureInPictureAutomaticallyFromInline = true
+        return vc
+    }
+
+    func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {}
+}                .clipped()
+            LinearGradient(colors: [.clear, .black.opacity(0.92)], startPoint: .center, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(label).font(.caption.weight(.bold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Text(item.name).font(.largeTitle.weight(.heavy)).lineLimit(2)
+                HStack(spacing: 12) {
+                    Button { store.play(item) } label: {
+                        Label(t("Play"), systemImage: "play.fill")
+                            .font(.headline)
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 12)
+                            .background(.white, in: Capsule())
+                    }
+                    Button { store.toggleFavorite(item) } label: {
+                        Image(systemName: store.isFavorite(item) ? "checkmark" : "plus")
+                            .font(.headline)
+                            .frame(width: 46, height: 46)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(20)
+        }
+        .frame(height: 480)
+        .clipped()
+    }
+}
+
+struct EmptyStateView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var showAdd = false
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "play.tv.fill")
+                .font(.system(size: 56))
+                .foregroundStyle(.white)
+                .frame(width: 110, height: 110)
+                .background(LinearGradient(colors: [Color.ram, Color(red: 0.03, green: 0.1, blue: 0.6)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            Text(t("Welcome to RaM tv")).font(.title.bold())
+            Text(t("Add your own M3U playlist or server login to start watching. RaM tv is a player only and includes no channels or content."))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            Button { showAdd = true } label: {
+                Text(t("Add Source")).font(.headline).frame(maxWidth: 260).padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            Button(t("Try Demo")) { store.addDemo() }
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, minHeight: 640)
+        .sheet(isPresented: $showAdd) { AddSourceView() }
+    }
+}
+
 struct PlayerScreen: View {
     let req: PlayRequest
     @Environment(\.dismiss) private var dismiss
