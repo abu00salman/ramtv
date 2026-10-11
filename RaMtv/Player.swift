@@ -41,9 +41,9 @@ enum ResumeStore {
     static func save(_ id: String, seconds: Double, duration: Double) {
         guard duration > 120, seconds.isFinite else { return }
         var m = load()
-        if seconds < 20 || seconds / duration > 0.95 {
+        if seconds / duration > 0.95 {
             m.removeValue(forKey: id)
-        } else {
+        } else if seconds >= 20 {
             m[id] = [seconds, duration]
         }
         UserDefaults.standard.set(m, forKey: key)

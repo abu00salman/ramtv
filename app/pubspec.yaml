@@ -1,0 +1,40 @@
+name: ramtv
+description: RaM tv - IPTV player for Android, Android TV, Windows and macOS
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
+  http: ^1.2.0
+  shared_preferences: ^2.2.2
+  path_provider: ^2.1.2
+  wakelock_plus: ^1.2.4
+
+dev_dependencies:
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon.png"
+  windows:
+    generate: true
+    image_path: "assets/icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/icon.png"
