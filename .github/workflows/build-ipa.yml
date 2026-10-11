@@ -3,6 +3,8 @@ name: Build all platforms
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -17,6 +19,8 @@ jobs:
         run: brew install xcodegen
       - name: Build unsigned IPA
         run: bash build.sh
+        env:
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: ios
@@ -36,6 +40,9 @@ jobs:
           cache: true
       - name: Build Android and Android TV (APK)
         run: bash app/ci/android.sh
+        env:
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
       - uses: actions/upload-artifact@v4
         with:
           name: android
@@ -52,6 +59,8 @@ jobs:
       - name: Build Windows
         shell: bash
         run: bash app/ci/windows.sh
+        env:
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -67,6 +76,8 @@ jobs:
           cache: true
       - name: Build macOS
         run: bash app/ci/macos.sh
+        env:
+          TMDB_KEY: ${{ secrets.TMDB_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -74,7 +85,7 @@ jobs:
 
   release:
     needs: [ios, android, windows, macos]
-    if: ${{ always() }}
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
