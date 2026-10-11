@@ -1,0 +1,48 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (no code signing)
+        run: |
+          set -eo pipefail
+          xcodebuild -project RaMtv.xcodeproj -scheme RaMtv \
+            -configuration Release -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tail -n 80
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/RaMtv.app Payload/
+          zip -qry RaM-tv-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RaM-tv-unsigned-ipa
+          path: RaM-tv-unsigned.ipa
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: RaM tv build ${{ github.run_number }}
+          files: RaM-tv-unsigned.ipa
