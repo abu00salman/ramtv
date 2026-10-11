@@ -10,7 +10,8 @@ set -e
 if [ "$st" -ne 0 ]; then bash ci/report_errors.sh build.log; exit "$st"; fi
 
 PY=$(command -v python3 || command -v python)
-REL=$(find build/windows -type d -name Release | head -1)
+REL=$(find build/windows -type d -path "*runner/Release" | head -1)
+test -f "$REL/ramtv.exe" || { echo "::error::ramtv.exe not found in $REL"; ls -R build/windows | head -40; exit 1; }
 echo "Release folder: $REL"
 mkdir -p ../dist
 "$PY" - "$REL" ../dist/RaM-tv-Windows-x64 <<'PYEOF'
