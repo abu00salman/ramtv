@@ -7,6 +7,8 @@ bash ci/prepare.sh android
 if [ -n "${DEBUG_KEYSTORE_BASE64:-}" ]; then
   mkdir -p "$HOME/.android"
   echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$HOME/.android/debug.keystore"
+  cp "$HOME/.android/debug.keystore" android/app/ramtv.keystore
+  python3 ci/sign.py
   echo "Using fixed signing key"
 fi
 
