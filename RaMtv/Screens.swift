@@ -300,7 +300,7 @@ struct SettingsView: View {
                     ForEach(store.sources) { s in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(s.name).font(.headline)
-                            Text(s.type == .demo ? t("Demo") : s.url)
+                            Text(s.type == .demo ? t("Demo") : s.url.replacingOccurrences(of: "(?i)(password|pass|pwd)=[^&]+", with: "$1=••••", options: .regularExpression))
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
@@ -329,6 +329,8 @@ struct SettingsView: View {
                 Section(t("About")) {
                     Text(t("RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access."))
                         .font(.footnote).foregroundStyle(.secondary)
+                    Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                        .font(.caption2).foregroundStyle(.secondary)
                     HStack { Text("RaM tv"); Spacer(); Text("1.0").foregroundStyle(.secondary) }
                 }
             }

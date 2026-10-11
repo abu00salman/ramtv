@@ -209,7 +209,10 @@ final class ArtworkService {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("artwork2.json")
     }
 
-    private var tmdbKey: String { (UserDefaults.standard.string(forKey: "tmdbKey") ?? "").trimmed }
+    private var tmdbKey: String {
+        let user = (UserDefaults.standard.string(forKey: "tmdbKey") ?? "").trimmed
+        return user.isEmpty ? builtInTMDBKey : user
+    }
 
     init() {
         if let d = try? Data(contentsOf: fileURL),

@@ -7,6 +7,8 @@ import 'paths.dart';
 import 'store.dart';
 import 'text_utils.dart';
 
+const String _builtInTmdbKey = String.fromEnvironment('TMDB_KEY');
+
 class ArtRes {
   final String? url;
   final bool cacheable;
@@ -161,7 +163,10 @@ class ArtworkService {
   DateTime _nextSlot = DateTime.fromMillisecondsSinceEpoch(0);
   bool _loaded = false;
 
-  String get _tmdbKey => (store.prefs.getString('tmdbKey') ?? '').trim();
+  String get _tmdbKey {
+    final user = (store.prefs.getString('tmdbKey') ?? '').trim();
+    return user.isEmpty ? _builtInTmdbKey : user;
+  }
 
   Future<void> _ensureLoaded() async {
     if (_loaded) return;

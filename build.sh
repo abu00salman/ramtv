@@ -1,6 +1,10 @@
 #!/bin/bash
 set -o pipefail
 
+if [ -n "${TMDB_KEY:-}" ]; then
+  printf 'let builtInTMDBKey = "%s"\n' "$TMDB_KEY" > RaMtv/BuiltInKey.swift
+fi
+
 xcodegen generate
 pod install
 
