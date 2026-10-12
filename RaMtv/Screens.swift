@@ -62,8 +62,9 @@ struct HomeView: View {
                 }
             }
             .ignoresSafeArea(edges: .top)
-            .background(Color.black)
-            .toolbar(.hidden, for: .navigationBar)
+            .background(Color(uiColor: .systemBackground))
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .quickAppearanceToggle()
             .navigationDestination(for: Item.self) { SeriesDetailView(item: $0) }
         }
     }
@@ -120,8 +121,8 @@ struct LiveView: View {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(selected ? Color.ram : Color.white.opacity(0.1), in: Capsule())
-                .foregroundStyle(.white)
+                .background(selected ? Color.ram : Color(uiColor: .secondarySystemBackground), in: Capsule())
+                .foregroundStyle(selected ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
     }
@@ -161,8 +162,9 @@ struct LiveView: View {
                 }
                 .overlay { if channels.isEmpty { Text(t("No channels")).foregroundStyle(.secondary) } }
             }
-            .background(Color.black)
+            .background(Color(uiColor: .systemBackground))
             .navigationTitle(t("Live"))
+            .quickAppearanceToggle()
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Picker(t("Channel layout"), selection: $liveLayout) {
@@ -209,8 +211,9 @@ struct LibraryView: View {
                     .padding(16)
                 }
             }
-            .background(Color.black)
+            .background(Color(uiColor: .systemBackground))
             .navigationTitle(t("Library"))
+            .quickAppearanceToggle()
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
@@ -261,14 +264,14 @@ struct SeriesDetailView: View {
                                 Text("\(e.number). \(e.title)").lineLimit(2)
                             }
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .background(Color.black)
+        .background(Color(uiColor: .systemBackground))
         .navigationTitle(item.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -298,8 +301,9 @@ struct SearchView: View {
                 }
             }
             .listStyle(.plain)
-            .background(Color.black)
+            .background(Color(uiColor: .systemBackground))
             .navigationTitle(t("Search"))
+            .quickAppearanceToggle()
             .searchable(text: $query, prompt: t("Search channels, movies, series"))
             .navigationDestination(for: Item.self) { SeriesDetailView(item: $0) }
         }
@@ -324,11 +328,17 @@ struct SettingsView: View {
     @AppStorage("tmdbKey") private var tmdbKey = ""
     @AppStorage("appLanguage") private var language = AppLanguage.system.rawValue
     @AppStorage("liveLayout") private var liveLayout = "list"
+    @AppStorage("appAppearance") private var appearance = AppAppearance.dark.rawValue
 
     var body: some View {
         NavigationStack {
             List {
                 Section(t("Appearance")) {
+                    Picker(t("Display mode"), selection: $appearance) {
+                        Text(t("Night mode")).tag(AppAppearance.dark.rawValue)
+                        Text(t("Day mode")).tag(AppAppearance.light.rawValue)
+                        Text(t("Follow system")).tag(AppAppearance.system.rawValue)
+                    }
                     Picker(t("Language"), selection: $language) {
                         Text(t("System language")).tag(AppLanguage.system.rawValue)
                         Text("العربية").tag(AppLanguage.arabic.rawValue)
@@ -344,7 +354,7 @@ struct SettingsView: View {
                     ForEach(store.sources) { s in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(s.name).font(.headline)
-                            Text(s.type == .demo ? t("Demo") : s.url.replacingOccurrences(of: "(?i)(password|pass|pwd)=[^&]+", with: "$1=••••", options: .regularExpression))
+                            Text(s.type == .demo ? t("Demo") : (URL(string: s.url)?.host ?? t("Playlist URL")))
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
@@ -373,19 +383,22 @@ struct SettingsView: View {
                 Section(t("About")) {
                     Text(t("RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access."))
                         .font(.footnote).foregroundStyle(.secondary)
+                    Link(t("Series metadata: TVmaze") + " (CC BY-SA)", destination: URL(string: "https://www.tvmaze.com/api")!)
+                        .font(.caption)
                     Text(t("This product uses the TMDB API but is not endorsed or certified by TMDB."))
                         .font(.caption2).foregroundStyle(.secondary)
                     HStack {
                         Text("RaM tv")
                         Spacer()
-                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1")
+                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2")
                             .foregroundStyle(.secondary)
                     }
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color.black)
+            .background(Color(uiColor: .systemBackground))
             .navigationTitle(t("Settings"))
+            .quickAppearanceToggle()
             .sheet(isPresented: $showAdd) { AddSourceView() }
         }
     }

@@ -12,7 +12,7 @@ struct PosterCard: View {
         VStack(alignment: .leading, spacing: 6) {
             ArtThumb(item: item, fit: item.kind == .live)
                 .frame(width: width, height: height)
-                .background(Color.white.opacity(0.08))
+                .background(Color(uiColor: .secondarySystemBackground))
                 .overlay(alignment: .bottom) {
                     if item.kind != .live, let f = ResumeStore.fraction(item.id) {
                         GeometryReader { g in
@@ -113,6 +113,8 @@ struct HeroView: View {
                 .buttonStyle(.plain)
             }
             .padding(20)
+            .foregroundStyle(.white)
+            .environment(\.colorScheme, .dark)
         }
         .frame(height: 480)
         .clipped()
