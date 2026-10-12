@@ -21,6 +21,10 @@ enum Engine: Equatable {
         let url = r.url
         let ext = url.pathExtension.lowercased()
         if ["m3u8", "mp4", "m4v", "mov"].contains(ext) { return .av(url, fallback: url) }
+        // Xtream commonly offers HLS beside its TS endpoint. Retain VLC fallback.
+        if r.isLive && ext == "ts" && url.path.contains("/live/") {
+            return .av(url.deletingPathExtension().appendingPathExtension("m3u8"), fallback: url)
+        }
         if ext.isEmpty && r.isLive {
             if EnginePrefs.get(url.host) == "vlc" { return .vlc(url) }
             return .av(url.appendingPathExtension("m3u8"), fallback: url)
@@ -72,11 +76,35 @@ final class PlayerHub {
     static let shared = PlayerHub()
     private(set) var heldVC: AVPlayerViewController?
     var onRestore: (() -> Void)?
+    private(set) var heldModel: AVModel?
+    private var heldDelegate: AnyObject?
+    var restoring = false
+    var restoreCompletion: ((Bool) -> Void)?
 
-    func hold(_ vc: AVPlayerViewController) { heldVC = vc }
-    func release() {
-        heldVC?.player?.pause()
+    func finishRestore() {
+        let completion = restoreCompletion
+        restoreCompletion = nil
+        completion?(true)
+    }
+
+    func hold(_ vc: AVPlayerViewController, model: AVModel?, delegate: AnyObject) {
+        heldVC = vc
+        heldModel = model
+        heldDelegate = delegate
+    }
+    func reusableModel(for url: URL) -> AVModel? {
+        heldModel?.url == url ? heldModel : nil
+    }
+    func release(pause: Bool = true) {
+        if pause && !restoring { heldVC?.player?.pause() }
         heldVC = nil
+        heldModel = nil
+        heldDelegate = nil
+        restoring = false
+        if let completion = restoreCompletion {
+            restoreCompletion = nil
+            completion(false)
+        }
     }
     func isHolding(_ p: AVPlayer) -> Bool { heldVC?.player === p }
 }
@@ -125,6 +153,8 @@ struct PlayerScreen: View {
             .id(req.id)
             topBar
         }
+        .tint(.white)
+        .onAppear { PlayerHub.shared.finishRestore() }
         .sheet(isPresented: $showList) {
             ChannelPickerSheet(currentId: req.item?.id) { item in
                 if let r = store.jump(to: item) { switchTo(r) }
@@ -160,20 +190,36 @@ struct PlayerScreen: View {
 
     private var topBar: some View {
         HStack(spacing: 8) {
-            barButton("xmark") { dismiss() }
+            barButton("xmark") { dismiss() }.accessibilityLabel(t("Close"))
             if store.canStep {
-                barButton("backward.end.fill") { zap(-1) }
-                barButton("forward.end.fill") { zap(1) }
+                barButton("backward.end.fill") { zap(-1) }.accessibilityLabel(t("Previous channel"))
+                barButton("forward.end.fill") { zap(1) }.accessibilityLabel(t("Next channel"))
             }
             if req.isLive && store.queue.count > 1 {
-                barButton("list.bullet") { showList = true }
+                barButton("list.bullet") { showList = true }.accessibilityLabel(t("Channel list"))
+            }
+            if !isAV {
+                Menu {
+                    Button(t("Apple player")) {
+                        let url = req.url
+                        let candidate = req.isLive && url.pathExtension.lowercased() == "ts" && url.path.contains("/live/")
+                            ? url.deletingPathExtension().appendingPathExtension("m3u8") : url
+                        engine = .av(candidate, fallback: url)
+                    }
+                    Text(t("Apple player offers Picture in Picture for compatible streams."))
+                } label: {
+                    Image(systemName: "pip.enter")
+                        .frame(width: 40, height: 40)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel(t("Apple player"))
             }
             Text(req.title)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
                 .shadow(radius: 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, isAV ? 150 : 0)
+                .padding(.trailing, isAV ? 120 : 0)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -216,13 +262,27 @@ struct ChannelPickerSheet: View {
 
 final class AVModel: ObservableObject {
     let player: AVPlayer
+    let url: URL
     private var obs: NSKeyValueObservation?
     private var timeObs: Any?
     private var endObs: NSObjectProtocol?
     private var didResume = false
+    private var onReadyHandler: () -> Void
+    private var onFailHandler: () -> Void
+    private var onEndedHandler: () -> Void
+
+    func updateHandlers(onReady: @escaping () -> Void, onFail: @escaping () -> Void, onEnded: @escaping () -> Void) {
+        onReadyHandler = onReady
+        onFailHandler = onFail
+        onEndedHandler = onEnded
+    }
 
     init(url: URL, resumeKey: String?,
          onReady: @escaping () -> Void, onFail: @escaping () -> Void, onEnded: @escaping () -> Void) {
+        self.url = url
+        self.onReadyHandler = onReady
+        self.onFailHandler = onFail
+        self.onEndedHandler = onEnded
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "RaMtv/1.0"]])
@@ -231,16 +291,17 @@ final class AVModel: ObservableObject {
         player.allowsExternalPlayback = true
 
         obs = item.observe(\.status, options: [.new]) { [weak self] it, _ in
-            DispatchQueue.main.async {
-                if it.status == .failed { onFail() }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if it.status == .failed { self.onFailHandler() }
                 if it.status == .readyToPlay {
-                    if let self = self, !self.didResume {
+                    if !self.didResume {
                         self.didResume = true
                         if let key = resumeKey, let r = ResumeStore.get(key), r.seconds > 20 {
                             self.player.seek(to: CMTime(seconds: max(0, r.seconds - 3), preferredTimescale: 600))
                         }
                     }
-                    onReady()
+                    self.onReadyHandler()
                 }
             }
         }
@@ -253,9 +314,9 @@ final class AVModel: ObservableObject {
             }
         }
 
-        endObs = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
+        endObs = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             if let key = resumeKey { ResumeStore.clear(key) }
-            onEnded()
+            self?.onEndedHandler()
         }
         player.play()
     }
@@ -270,29 +331,41 @@ final class AVModel: ObservableObject {
 struct AVPlayerScreen: View {
     @StateObject private var model: AVModel
     let onPiPStart: () -> Void
+    let onReady: () -> Void
+    let onFail: () -> Void
+    let onEnded: () -> Void
 
     init(url: URL, resumeKey: String?,
          onReady: @escaping () -> Void, onFail: @escaping () -> Void,
          onEnded: @escaping () -> Void, onPiPStart: @escaping () -> Void) {
-        _model = StateObject(wrappedValue: AVModel(url: url, resumeKey: resumeKey,
+        _model = StateObject(wrappedValue: PlayerHub.shared.reusableModel(for: url) ?? AVModel(url: url, resumeKey: resumeKey,
                                                    onReady: onReady, onFail: onFail, onEnded: onEnded))
         self.onPiPStart = onPiPStart
+        self.onReady = onReady
+        self.onFail = onFail
+        self.onEnded = onEnded
     }
 
     var body: some View {
-        AVPlayerView(player: model.player, onPiPStart: onPiPStart).ignoresSafeArea()
+        AVPlayerView(model: model, onPiPStart: onPiPStart).ignoresSafeArea()
+            .onAppear { model.updateHandlers(onReady: onReady, onFail: onFail, onEnded: onEnded) }
     }
 }
 
 struct AVPlayerView: UIViewControllerRepresentable {
-    let player: AVPlayer
+    let model: AVModel
+    private var player: AVPlayer { model.player }
     let onPiPStart: () -> Void
 
     func makeCoordinator() -> Coord { Coord() }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let vc = AVPlayerViewController()
+        let vc = PlayerHub.shared.isHolding(player) ? (PlayerHub.shared.heldVC ?? AVPlayerViewController()) : AVPlayerViewController()
         vc.player = player
+        vc.showsPlaybackControls = true
+        vc.videoGravity = .resizeAspect
+        vc.requiresLinearPlayback = false
+        context.coordinator.model = model
         vc.allowsPictureInPicturePlayback = true
         vc.canStartPictureInPictureAutomaticallyFromInline = true
         vc.delegate = context.coordinator
@@ -306,10 +379,18 @@ struct AVPlayerView: UIViewControllerRepresentable {
 
     final class Coord: NSObject, AVPlayerViewControllerDelegate {
         var onPiPStart: () -> Void = {}
+        weak var model: AVModel?
 
         func playerViewControllerWillStartPictureInPicture(_ vc: AVPlayerViewController) {
-            PlayerHub.shared.hold(vc)
+            PlayerHub.shared.hold(vc, model: model, delegate: self)
+        }
+
+        func playerViewControllerDidStartPictureInPicture(_ vc: AVPlayerViewController) {
             DispatchQueue.main.async { self.onPiPStart() }
+        }
+
+        func playerViewController(_ vc: AVPlayerViewController, failedToStartPictureInPictureWithError error: Error) {
+            PlayerHub.shared.release(pause: false)
         }
 
         func playerViewControllerDidStopPictureInPicture(_ vc: AVPlayerViewController) {
@@ -318,8 +399,13 @@ struct AVPlayerView: UIViewControllerRepresentable {
 
         func playerViewController(_ vc: AVPlayerViewController,
                                   restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-            PlayerHub.shared.onRestore?()
-            completionHandler(true)
+            guard let restore = PlayerHub.shared.onRestore else {
+                completionHandler(false)
+                return
+            }
+            PlayerHub.shared.restoring = true
+            PlayerHub.shared.restoreCompletion = completionHandler
+            restore()
         }
     }
 }
@@ -338,7 +424,7 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var retries = 0
     private var reconnectPending = false
 
-    @Published var message = "Loading..."
+    @Published var message = t("Loading") + "..."
     @Published var failed = false
     @Published var isPlaying = false
     @Published var position: Double = 0
@@ -448,13 +534,13 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if reconnectPending { return }
         guard retries < 6 else {
             failed = true
-            message = "Stream unavailable. Check your connection or try another channel."
+            message = t("Stream unavailable. Check your connection or try another channel.")
             return
         }
         retries += 1
         reconnectPending = true
         failed = false
-        message = "Reconnecting... (\(retries))"
+        message = t("Reconnecting") + "... (\(retries))"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self = self else { return }
             self.reconnectPending = false
@@ -471,7 +557,7 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                     self.reconnect()
                 } else {
                     self.failed = true
-                    self.message = "Playback failed (stream not reachable or not supported)"
+                    self.message = t("Playback failed (stream not reachable or not supported)")
                 }
             case .ended:
                 if self.isLive {
@@ -481,7 +567,7 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                     self.onEnded()
                 }
             case .opening, .buffering:
-                if !self.player.isPlaying && !self.reconnectPending { self.message = "Loading..." }
+                if !self.player.isPlaying && !self.reconnectPending { self.message = t("Loading") + "..." }
             case .playing:
                 self.retries = 0
                 self.message = ""
@@ -649,12 +735,33 @@ struct VLCPlayerView: View {
             if showChrome {
                 VStack {
                     Spacer()
+                    HStack(spacing: 32) {
+                        if model.seekable {
+                            iconButton("gobackward.10", size: .title) { model.skip(-10) }
+                        }
+                        Button {
+                            model.toggle()
+                            scheduleHide()
+                        } label: {
+                            Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 38, weight: .semibold))
+                                .frame(width: 80, height: 80)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(t(model.isPlaying ? "Pause" : "Play"))
+                        if model.seekable {
+                            iconButton("goforward.10", size: .title) { model.skip(10) }
+                        }
+                    }
+                    Spacer()
                     controlPanel
                 }
                 .transition(.opacity)
             }
         }
         .onAppear { scheduleHide() }
+        .onDisappear { hideTask?.cancel(); hudTask?.cancel() }
         .onChange(of: model.isPlaying) { playing in
             if playing { scheduleHide() } else { hideTask?.cancel(); withAnimation { showChrome = true } }
         }
@@ -682,7 +789,7 @@ struct VLCPlayerView: View {
             HStack(spacing: 0) {
                 Menu {
                     if !model.audioNames.isEmpty {
-                        Section("Audio") {
+                        Section(t("Audio")) {
                             ForEach(Array(model.audioNames.enumerated()), id: \.offset) { i, name in
                                 if i < model.audioIndexes.count {
                                     Button {
@@ -695,7 +802,7 @@ struct VLCPlayerView: View {
                         }
                     }
                     if !model.subNames.isEmpty {
-                        Section("Subtitles") {
+                        Section(t("Subtitles")) {
                             ForEach(Array(model.subNames.enumerated()), id: \.offset) { i, name in
                                 if i < model.subIndexes.count {
                                     Button {
@@ -717,7 +824,7 @@ struct VLCPlayerView: View {
                         Button {
                             model.setAspect(i)
                         } label: {
-                            Label(name, systemImage: model.aspect == i ? "checkmark" : "")
+                            Label(t(name), systemImage: model.aspect == i ? "checkmark" : "")
                         }
                     }
                 } label: {
@@ -725,10 +832,6 @@ struct VLCPlayerView: View {
                 }
                 .foregroundStyle(.white)
 
-                Spacer()
-                if model.seekable { iconButton("gobackward.10", size: .title2) { model.skip(-10) } }
-                iconButton(model.isPlaying ? "pause.fill" : "play.fill", size: .largeTitle) { model.toggle() }
-                if model.seekable { iconButton("goforward.10", size: .title2) { model.skip(10) } }
                 Spacer()
 
                 if model.seekable {

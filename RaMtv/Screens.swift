@@ -1,16 +1,21 @@
 import SwiftUI
 
 struct RootView: View {
+    @AppStorage("appLanguage") private var language = AppLanguage.system.rawValue
+    @State private var selectedTab = 0
     @EnvironmentObject var store: AppStore
 
     var body: some View {
-        TabView {
-            HomeView().tabItem { Label(t("Home"), systemImage: "house.fill") }
-            LiveView().tabItem { Label(t("Live"), systemImage: "antenna.radiowaves.left.and.right") }
-            LibraryView().tabItem { Label(t("Library"), systemImage: "film.stack") }
-            SearchView().tabItem { Label(t("Search"), systemImage: "magnifyingglass") }
-            SettingsView().tabItem { Label(t("Settings"), systemImage: "gearshape.fill") }
+        TabView(selection: $selectedTab) {
+            HomeView().tabItem { Label(t("Home"), systemImage: "house.fill") }.tag(0)
+            LiveView().tabItem { Label(t("Live"), systemImage: "antenna.radiowaves.left.and.right") }.tag(1)
+            LibraryView().tabItem { Label(t("Library"), systemImage: "film.stack") }.tag(2)
+            SearchView().tabItem { Label(t("Search"), systemImage: "magnifyingglass") }.tag(3)
+            SettingsView().tabItem { Label(t("Settings"), systemImage: "gearshape.fill") }.tag(4)
         }
+        .id(language)
+        .environment(\.locale, (AppLanguage(rawValue: language) ?? .system).locale)
+        .environment(\.layoutDirection, (AppLanguage(rawValue: language) ?? .system).isArabic ? .rightToLeft : .leftToRight)
         .overlay(alignment: .top) {
             if store.loading {
                 HStack(spacing: 8) {
@@ -102,6 +107,7 @@ struct LiveView: View {
     @EnvironmentObject var store: AppStore
     @State private var group: String? = nil
     @State private var favOnly = false
+    @AppStorage("liveLayout") private var liveLayout = "list"
 
     private var filtered: [Item] {
         if favOnly { return store.live.filter { store.favorites.contains($0.id) } }
@@ -134,15 +140,39 @@ struct LiveView: View {
                     .padding(.horizontal, 16)
                 }
                 .frame(height: 52)
-                List(filtered) { item in
-                    ChannelRow(item: item) { store.play(item, in: filtered) }
-                        .listRowBackground(Color.clear)
+                let channels = filtered
+                Group {
+                    if liveLayout == "grid" {
+                        ScrollView {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
+                                ForEach(channels) { item in
+                                    ChannelGridCard(item: item) { store.play(item, in: channels) }
+                                }
+                            }
+                            .padding(16)
+                        }
+                    } else {
+                        List(channels) { item in
+                            ChannelRow(item: item) { store.play(item, in: channels) }
+                                .listRowBackground(Color.clear)
+                        }
+                        .listStyle(.plain)
+                    }
                 }
-                    .listStyle(.plain)
-                    .overlay { if store.live.isEmpty { Text(t("No channels")).foregroundStyle(.secondary) } }
+                .overlay { if channels.isEmpty { Text(t("No channels")).foregroundStyle(.secondary) } }
             }
             .background(Color.black)
             .navigationTitle(t("Live"))
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Picker(t("Channel layout"), selection: $liveLayout) {
+                        Label(t("List"), systemImage: "list.bullet").tag("list")
+                        Label(t("Grid"), systemImage: "square.grid.2x2").tag("grid")
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("live.layout")
+                }
+            }
         }
     }
 }
@@ -292,10 +322,24 @@ struct SettingsView: View {
     @EnvironmentObject var store: AppStore
     @State private var showAdd = false
     @AppStorage("tmdbKey") private var tmdbKey = ""
+    @AppStorage("appLanguage") private var language = AppLanguage.system.rawValue
+    @AppStorage("liveLayout") private var liveLayout = "list"
 
     var body: some View {
         NavigationStack {
             List {
+                Section(t("Appearance")) {
+                    Picker(t("Language"), selection: $language) {
+                        Text(t("System language")).tag(AppLanguage.system.rawValue)
+                        Text("العربية").tag(AppLanguage.arabic.rawValue)
+                        Text("English").tag(AppLanguage.english.rawValue)
+                    }
+                    .accessibilityIdentifier("settings.language")
+                    Picker(t("Channel layout"), selection: $liveLayout) {
+                        Text(t("List")).tag("list")
+                        Text(t("Grid")).tag("grid")
+                    }
+                }
                 Section(t("Sources")) {
                     ForEach(store.sources) { s in
                         VStack(alignment: .leading, spacing: 2) {
@@ -317,21 +361,26 @@ struct SettingsView: View {
                     Section { Text(e).font(.footnote).foregroundStyle(.red) }
                 }
                 Section {
-                    TextField("TMDB API key (optional)", text: $tmdbKey)
+                    TextField(t("TMDB API key (optional)"), text: $tmdbKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Button("Clear artwork cache") { ArtworkService.shared.clear() }
+                    Button(t("Clear artwork cache")) { ArtworkService.shared.clear() }
                 } header: {
-                    Text("Artwork")
+                    Text(t("Artwork"))
                 } footer: {
-                    Text("Posters and channel logos are fetched automatically. For best movie and series posters, add a free API key from themoviedb.org (Settings > API), then restart the app.")
+                    Text(t("Posters and channel logos are fetched automatically. For best movie and series posters, add a free API key from themoviedb.org (Settings > API), then restart the app."))
                 }
                 Section(t("About")) {
                     Text(t("RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access."))
                         .font(.footnote).foregroundStyle(.secondary)
-                    Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                    Text(t("This product uses the TMDB API but is not endorsed or certified by TMDB."))
                         .font(.caption2).foregroundStyle(.secondary)
-                    HStack { Text("RaM tv"); Spacer(); Text("1.0").foregroundStyle(.secondary) }
+                    HStack {
+                        Text("RaM tv")
+                        Spacer()
+                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .scrollContentBackground(.hidden)

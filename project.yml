@@ -1,4 +1,12 @@
 name: RaMtv
+schemes:
+  RaMtv:
+    build:
+      targets:
+        RaMtv: all
+        RaMtvTests: [test]
+    test:
+      targets: [RaMtvTests]
 options:
   bundleIdPrefix: com.ramzi
   deploymentTarget:
@@ -7,9 +15,19 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
-    MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.1"
+    CURRENT_PROJECT_VERSION: "2"
 targets:
+  RaMtvTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [RaMtvTests]
+    dependencies:
+      - target: RaMtv
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.ramzi.ramtv.tests
   RaMtv:
     type: application
     platform: iOS

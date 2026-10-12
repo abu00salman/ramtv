@@ -4,6 +4,9 @@ project 'RaMtv.xcodeproj'
 target 'RaMtv' do
   use_frameworks!
   pod 'MobileVLCKit', '~> 3.6'
+  target 'RaMtvTests' do
+    inherit! :search_paths
+  end
 end
 
 post_install do |installer|
