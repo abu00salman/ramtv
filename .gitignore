@@ -1,0 +1,10 @@
+app/.dart_tool/
+app/build/
+app/.flutter-plugins-dependencies
+app/_scaffold/
+app/android/
+app/windows/
+app/macos/
+dist/
+**/__pycache__/
+*.log
