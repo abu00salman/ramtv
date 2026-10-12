@@ -39,6 +39,8 @@ jobs:
         run: bash build.sh
         env:
           TMDB_KEY: ${{ secrets.TMDB_KEY }}
+      - name: Test iPhone preferences and PiP ownership
+        run: bash tools/test_ios.sh
       - uses: actions/upload-artifact@v4
         with:
           name: ios
