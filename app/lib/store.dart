@@ -2,17 +2,38 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 import 'm3u.dart';
 import 'paths.dart';
 import 'text_utils.dart';
+import 'epg.dart';
 
-String _encodeItems(List<Item> l) => jsonEncode(l.map((e) => e.toJson()).toList());
+String _encodeItems(List<Item> l) =>
+    jsonEncode(l.map((e) => e.toJson()).toList());
 
-List<Item> _decodeItems(String s) => (jsonDecode(s) as List)
-    .map((e) => Item.fromJson(Map<String, dynamic>.from(e as Map)))
-    .toList();
+List<T> _decodeSavedList<T>(
+    String? text, T Function(Map<String, dynamic>) decode) {
+  if (text == null) return [];
+  try {
+    final data = jsonDecode(text);
+    if (data is! List) return [];
+    final out = <T>[];
+    for (final row in data) {
+      try {
+        if (row is Map) out.add(decode(Map<String, dynamic>.from(row)));
+      } catch (_) {
+        // One corrupt entry must not prevent startup or hide valid entries.
+      }
+    }
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
+
+List<Item> _decodeItems(String s) => _decodeSavedList(s, Item.fromJson);
 
 class PlayRequest {
   final String title;
@@ -32,6 +53,30 @@ class PlayRequest {
 }
 
 class AppStore extends ChangeNotifier {
+  AppStore({http.Client Function()? clientFactory})
+      : _clientFactory = clientFactory ?? http.Client.new;
+
+  final http.Client Function() _clientFactory;
+  final EpgCache _epgCache = EpgCache();
+
+  Future<List<EpgProgram>> epg(Item item, {required http.Client client}) async {
+    if (item.kind != Kind.live) return [];
+    final index = sources.indexWhere((s) => s.id == item.sourceId);
+    if (index < 0 || sources[index].type != 'xtream') return [];
+    final key = '${item.sourceId}|${item.id}';
+    final cached = _epgCache.get(key);
+    if (cached != null) return cached;
+    final path = Uri.tryParse(item.url ?? '')?.pathSegments;
+    if (path == null || path.isEmpty) return [];
+    final streamId = path.last.split('.').first;
+    if (int.tryParse(streamId) == null) return [];
+    final response = await XtreamClient(sources[index], client: client)
+        .call('get_short_epg', {'stream_id': streamId, 'limit': '6'});
+    final programs = parseXtreamEpg(response);
+    _epgCache.put(key, programs);
+    return programs;
+  }
+
   List<Source> sources = [];
   List<Item> items = [];
   List<Item> live = [];
@@ -42,6 +87,16 @@ class AppStore extends ChangeNotifier {
   List<Item> recents = [];
   bool loading = false;
   String? error;
+  int _refreshGeneration = 0;
+  http.Client? _refreshClient;
+  Future<void> _cacheWrite = Future<void>.value();
+
+  @override
+  void dispose() {
+    ++_refreshGeneration;
+    _refreshClient?.close();
+    super.dispose();
+  }
 
   List<Item> queue = [];
   int queueIndex = 0;
@@ -55,24 +110,26 @@ class AppStore extends ChangeNotifier {
 
   Future<void> init() async {
     prefs = await SharedPreferences.getInstance();
-    final s = prefs.getString('sources');
-    if (s != null) {
-      sources = (jsonDecode(s) as List)
-          .map((e) => Source.fromJson(Map<String, dynamic>.from(e as Map)))
-          .toList();
-    }
+    sources = _decodeSavedList(prefs.getString('sources'), Source.fromJson);
     favorites = (prefs.getStringList('favorites') ?? <String>[]).toSet();
-    final r = prefs.getString('recents');
-    if (r != null) {
-      recents = (jsonDecode(r) as List)
-          .map((e) => Item.fromJson(Map<String, dynamic>.from(e as Map)))
-          .toList();
-    }
+    recents = _decodeSavedList(prefs.getString('recents'), Item.fromJson);
     final rs = prefs.getString('resume');
     if (rs != null) {
-      final m = jsonDecode(rs) as Map<String, dynamic>;
-      _resume = m.map((k, v) =>
-          MapEntry(k, (v as List).map((x) => (x as num).toDouble()).toList()));
+      try {
+        final m = jsonDecode(rs);
+        if (m is Map) {
+          for (final entry in m.entries) {
+            final value = entry.value;
+            if (entry.key is String &&
+                value is List &&
+                value.length == 2 &&
+                value.every((x) => x is num && x.isFinite && x >= 0)) {
+              _resume[entry.key as String] =
+                  value.map((x) => (x as num).toDouble()).toList();
+            }
+          }
+        }
+      } catch (_) {}
     }
     try {
       final f = await cacheFile('items.json');
@@ -88,7 +145,9 @@ class AppStore extends ChangeNotifier {
     if (sources.isEmpty) return;
     final last = prefs.getInt('lastRefresh') ?? 0;
     final age = DateTime.now().millisecondsSinceEpoch - last;
-    if (items.isEmpty || age > 6 * 3600 * 1000 || (prefs.getInt('dataVersion') ?? 0) != 3) {
+    if (items.isEmpty ||
+        age > 6 * 3600 * 1000 ||
+        (prefs.getInt('dataVersion') ?? 0) != 3) {
       await refresh();
     }
   }
@@ -96,7 +155,8 @@ class AppStore extends ChangeNotifier {
   // ---------- Sources ----------
 
   void _saveSources() {
-    prefs.setString('sources', jsonEncode(sources.map((e) => e.toJson()).toList()));
+    prefs.setString(
+        'sources', jsonEncode(sources.map((e) => e.toJson()).toList()));
   }
 
   void addSource(Source s) {
@@ -106,9 +166,11 @@ class AppStore extends ChangeNotifier {
     refresh();
   }
 
-  String newId() => '${DateTime.now().microsecondsSinceEpoch}${Random().nextInt(9999)}';
+  String newId() =>
+      '${DateTime.now().microsecondsSinceEpoch}${Random().nextInt(9999)}';
 
-  void addDemo() => addSource(Source(id: newId(), name: 'Demo', type: 'demo', url: ''));
+  void addDemo() =>
+      addSource(Source(id: newId(), name: 'Demo', type: 'demo', url: ''));
 
   void removeSource(String id) {
     sources.removeWhere((e) => e.id == id);
@@ -118,8 +180,17 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    final generation = ++_refreshGeneration;
+    _refreshClient?.close();
+    final client = _clientFactory();
+    _refreshClient = client;
+    final currentSources = List<Source>.of(sources);
     if (sources.isEmpty) {
       _setItems([]);
+      loading = false;
+      error = null;
+      unawaited(_saveCache([]));
+      client.close();
       notifyListeners();
       return;
     }
@@ -127,30 +198,46 @@ class AppStore extends ChangeNotifier {
     error = null;
     notifyListeners();
     final all = <Item>[];
-    for (final s in sources) {
-      try {
-        if (s.type == 'm3u') {
-          all.addAll(await loadM3U(s));
-        } else if (s.type == 'xtream') {
-          all.addAll(await XtreamClient(s).fetchAll(s.id));
-        } else {
-          all.addAll(demoItems(s.id));
+    try {
+      for (final s in currentSources) {
+        try {
+          if (s.type == 'm3u') {
+            all.addAll(await loadM3U(s, client: client));
+          } else if (s.type == 'xtream') {
+            all.addAll(await XtreamClient(s, client: client).fetchAll(s.id));
+          } else {
+            all.addAll(demoItems(s.id));
+          }
+        } catch (_) {
+          if (generation != _refreshGeneration) return;
+          error =
+              '${s.name}: Unable to refresh source. Check connection and credentials.';
+          // Keep the last usable catalogue for an temporarily offline provider.
+          all.addAll(items.where((item) => item.sourceId == s.id));
         }
-      } catch (e) {
-        error = '${s.name}: $e';
+        if (generation != _refreshGeneration) return;
       }
+      _setItems(all);
+      loading = false;
+      if (error == null) {
+        prefs.setInt('lastRefresh', DateTime.now().millisecondsSinceEpoch);
+        prefs.setInt('dataVersion', 3);
+      }
+      notifyListeners();
+      unawaited(_saveCache(all));
+    } finally {
+      client.close();
+      if (identical(_refreshClient, client)) _refreshClient = null;
     }
-    _setItems(all);
-    loading = false;
-    if (error == null) {
-      prefs.setInt('lastRefresh', DateTime.now().millisecondsSinceEpoch);
-      prefs.setInt('dataVersion', 3);
-    }
-    notifyListeners();
-    unawaited(_saveCache(all));
   }
 
-  Future<void> _saveCache(List<Item> all) async {
+  Future<void> _saveCache(List<Item> all) {
+    final snapshot = List<Item>.of(all);
+    _cacheWrite = _cacheWrite.then((_) => _writeCache(snapshot));
+    return _cacheWrite;
+  }
+
+  Future<void> _writeCache(List<Item> all) async {
     try {
       final txt = await compute(_encodeItems, all);
       final f = await cacheFile('items.json');
@@ -185,7 +272,8 @@ class AppStore extends ChangeNotifier {
     return live.isNotEmpty ? live.first : null;
   }
 
-  List<Item> get favoriteItems => items.where((e) => favorites.contains(e.id)).toList();
+  List<Item> get favoriteItems =>
+      items.where((e) => favorites.contains(e.id)).toList();
 
   bool isFavorite(Item i) => favorites.contains(i.id);
 
@@ -213,7 +301,8 @@ class AppStore extends ChangeNotifier {
     recents.removeWhere((e) => e.id == item.id);
     recents.insert(0, item);
     if (recents.length > 20) recents = recents.sublist(0, 20);
-    prefs.setString('recents', jsonEncode(recents.map((e) => e.toJson()).toList()));
+    prefs.setString(
+        'recents', jsonEncode(recents.map((e) => e.toJson()).toList()));
   }
 
   PlayRequest? prepare(Item item, {List<Item>? list}) {
@@ -264,7 +353,8 @@ class AppStore extends ChangeNotifier {
   }
 
   PlayRequest _episodeRequest(Episode e) {
-    final label = epSeries.isEmpty ? e.title : '$epSeries S${e.season}E${e.number}';
+    final label =
+        epSeries.isEmpty ? e.title : '$epSeries S${e.season}E${e.number}';
     return PlayRequest(
       title: label,
       url: e.url,
@@ -274,7 +364,8 @@ class AppStore extends ChangeNotifier {
     );
   }
 
-  PlayRequest prepareEpisode(Episode e, List<Episode> list, String seriesTitle) {
+  PlayRequest prepareEpisode(
+      Episode e, List<Episode> list, String seriesTitle) {
     queue = [];
     epQueue = list;
     final i = list.indexWhere((x) => x.id == e.id);

@@ -265,7 +265,7 @@ class ArtworkService {
           return ArtRes('https://image.tmdb.org/t/p/w342${r['poster_path']}', true);
         }
       }
-      if (year != null) return _tmdb(title, null, series, key);
+      if (year != null) return await _tmdb(title, null, series, key);
       return const ArtRes(null, true);
     } catch (_) {
       return const ArtRes(null, false);

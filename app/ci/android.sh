@@ -22,6 +22,8 @@ mkdir -p ../dist
 OUT=build/app/outputs/flutter-apk
 cp "$OUT/app-arm64-v8a-release.apk" ../dist/RaM-tv-Android-arm64.apk
 cp "$OUT/app-armeabi-v7a-release.apk" ../dist/RaM-tv-Android-arm32.apk
+cp "$OUT/app-arm64-v8a-release.apk" ../dist/RaM-tv-Android-TV-arm64.apk
+cp "$OUT/app-armeabi-v7a-release.apk" ../dist/RaM-tv-Android-TV-arm32.apk
 ls -la ../dist
 
 # Report the signing certificate fingerprint (proves updates will install over previous builds)

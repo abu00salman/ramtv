@@ -11,18 +11,31 @@ class LanAddServer {
   HttpServer? _server;
   String pin = '';
   void Function()? onAdded;
+  int _lifecycle = 0;
+  int _failedPins = 0;
 
   Future<String?> start() async {
+    final lifecycle = ++_lifecycle;
     try {
-      pin = (1000 + Random().nextInt(9000)).toString();
+      pin = (100000 + Random.secure().nextInt(900000)).toString();
+      _failedPins = 0;
+      HttpServer server;
       try {
-        _server = await HttpServer.bind(InternetAddress.anyIPv4, 8080, shared: true);
+        server = await HttpServer.bind(InternetAddress.anyIPv4, 8080);
       } catch (_) {
-        _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+        server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
       }
+      if (lifecycle != _lifecycle) {
+        await server.close(force: true);
+        return null;
+      }
+      _server = server;
       _server!.listen(_handle, onError: (_) {});
       final ip = await _localIp();
-      if (ip == null) return null;
+      if (ip == null || lifecycle != _lifecycle) {
+        await server.close(force: true);
+        return null;
+      }
       return 'http://$ip:${_server!.port}';
     } catch (_) {
       return null;
@@ -30,6 +43,7 @@ class LanAddServer {
   }
 
   Future<void> stop() async {
+    ++_lifecycle;
     try {
       await _server?.close(force: true);
     } catch (_) {}
@@ -37,13 +51,16 @@ class LanAddServer {
   }
 
   Future<String?> _localIp() async {
-    final ifs = await NetworkInterface.list(type: InternetAddressType.IPv4, includeLoopback: false);
+    final ifs = await NetworkInterface.list(
+        type: InternetAddressType.IPv4, includeLoopback: false);
     String? fallback;
     for (final i in ifs) {
       for (final a in i.addresses) {
         final ip = a.address;
         if (a.isLoopback) continue;
-        if (ip.startsWith('192.168.') || ip.startsWith('10.') || RegExp(r'^172\.(1[6-9]|2\d|3[01])\.').hasMatch(ip)) {
+        if (ip.startsWith('192.168.') ||
+            ip.startsWith('10.') ||
+            RegExp(r'^172\.(1[6-9]|2\d|3[01])\.').hasMatch(ip)) {
           return ip;
         }
         fallback ??= ip;
@@ -55,6 +72,8 @@ class LanAddServer {
   Future<void> _respond(HttpRequest req, int code, String html) async {
     req.response.statusCode = code;
     req.response.headers.contentType = ContentType.html;
+    req.response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
+    req.response.headers.set('X-Content-Type-Options', 'nosniff');
     req.response.write(html);
     await req.response.close();
   }
@@ -66,18 +85,35 @@ class LanAddServer {
         return;
       }
       if (req.method == 'POST' && req.uri.path == '/add') {
-        final body = await utf8.decoder.bind(req).join();
+        if (_failedPins >= 5) {
+          await _respond(req, 429,
+              _msgPage('Reopen Add Source on the TV to try again.', ok: false));
+          return;
+        }
+        final bytes = <int>[];
+        await for (final chunk in req.timeout(const Duration(seconds: 15))) {
+          if (bytes.length + chunk.length > 16384) {
+            await _respond(req, 413, _msgPage('Request too large', ok: false));
+            return;
+          }
+          bytes.addAll(chunk);
+        }
+        final body = utf8.decode(bytes);
         final p = Uri.splitQueryString(body);
         if ((p['pin'] ?? '').trim() != pin) {
-          await _respond(req, 403, _msgPage('رمز PIN غير صحيح / Wrong PIN', ok: false));
+          _failedPins++;
+          await _respond(
+              req, 403, _msgPage('رمز PIN غير صحيح / Wrong PIN', ok: false));
           return;
         }
         final type = p['type'] == 'xtream' ? 'xtream' : 'm3u';
         final url = (p['url'] ?? '').trim();
         final user = (p['username'] ?? '').trim();
         final pass = p['password'] ?? '';
-        if (url.isEmpty || (type == 'xtream' && (user.isEmpty || pass.isEmpty))) {
-          await _respond(req, 400, _msgPage('بيانات ناقصة / Missing fields', ok: false));
+        if (url.isEmpty ||
+            (type == 'xtream' && (user.isEmpty || pass.isEmpty))) {
+          await _respond(
+              req, 400, _msgPage('بيانات ناقصة / Missing fields', ok: false));
           return;
         }
         final tmdb = (p['tmdb'] ?? '').trim();
@@ -93,7 +129,12 @@ class LanAddServer {
           username: user,
           password: pass,
         ));
-        await _respond(req, 200, _msgPage('تمت الإضافة، تابع على التلفاز / Added, continue on the TV', ok: true));
+        await _respond(
+            req,
+            200,
+            _msgPage(
+                'تمت الإضافة، تابع على التلفاز / Added, continue on the TV',
+                ok: true));
         onAdded?.call();
         return;
       }
@@ -112,7 +153,8 @@ class LanAddServer {
       'button{margin-top:22px;width:100%;padding:14px;border:0;border-radius:12px;background:#0057FF;color:#fff;font-size:17px;font-weight:700}'
       '.m{padding:18px;border-radius:12px;font-size:17px}';
 
-  String _formPage() => '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'
+  String _formPage() =>
+      '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">'
       '<meta name="viewport" content="width=device-width,initial-scale=1"><title>RaM tv</title>'
       '<style>$_style</style></head><body><h2>RaM tv — إضافة مصدر / Add source</h2>'
       '<form method="post" action="/add">'

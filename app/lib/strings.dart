@@ -31,6 +31,8 @@ const Map<String, String> _ar = {
   'No episodes': 'لا توجد حلقات',
   'Loading': 'جارٍ التحميل',
   'Reconnecting': 'إعادة الاتصال',
+  'Now': 'الآن',
+  'Program guide': 'دليل البرامج',
   'Audio': 'الصوت',
   'Subtitles': 'الترجمة',
   'Speed': 'السرعة',

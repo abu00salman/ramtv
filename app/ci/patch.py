@@ -16,28 +16,62 @@ def write(p, s):
 if platform == "android":
     p = "android/app/src/main/AndroidManifest.xml"
     s = read(p)
-    if "android.permission.INTERNET" not in s:
-        s = s.replace(
-            "<application",
-            '<uses-permission android:name="android.permission.INTERNET"/>\n'
-            '    <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>\n'
-            '    <uses-feature android:name="android.software.leanback" android:required="false"/>\n'
-            "    <application",
-            1,
-        )
+    for tag, name in [
+        ("uses-permission", "android.permission.INTERNET"),
+        ("uses-feature", "android.hardware.touchscreen"),
+        ("uses-feature", "android.software.leanback"),
+    ]:
+        if name not in s:
+            required = ' android:required="false"' if tag == "uses-feature" else ""
+            s = s.replace("<application", f'<{tag} android:name="{name}"{required}/>\n    <application', 1)
     s = re.sub(r'android:label="[^"]*"', 'android:label="RaM tv"', s, count=1)
-    s = s.replace(
-        "<application",
-        '<application android:usesCleartextTraffic="true" android:banner="@drawable/banner"',
-        1,
-    )
-    s = re.sub(
+    # Keep HTTP compatibility for user-provided IPTV servers; never disable TLS verification.
+    for key, value in [("usesCleartextTraffic", "true"), ("banner", "@drawable/banner"), ("allowBackup", "false")]:
+        if re.search(rf'android:{key}="[^"]*"', s):
+            s = re.sub(rf'android:{key}="[^"]*"', f'android:{key}="{value}"', s, count=1)
+        else:
+            s = s.replace("<application", f'<application android:{key}="{value}"', 1)
+    if "android.intent.category.LEANBACK_LAUNCHER" not in s:
+        s = re.sub(
         r'(<category android:name="android.intent.category.LAUNCHER"\s*/>)',
         r'\1\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>',
         s,
         count=1,
-    )
+        )
     write(p, s)
+
+    # Generated scaffolds are disposable; keep the TV bridge in this source script.
+    import glob
+    for activity in glob.glob("android/app/src/main/kotlin/**/MainActivity.kt", recursive=True):
+        kotlin = read(activity)
+        if "ramtv/device" in kotlin:
+            continue
+        package = re.search(r"^package\s+([\w.]+)", kotlin, re.MULTILINE)
+        if package:
+            write(activity, f"""package {package.group(1)}
+
+import android.app.UiModeManager
+import android.content.Context
+import android.content.res.Configuration
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity() {{
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {{
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ramtv/device")
+            .setMethodCallHandler {{ call, result ->
+                if (call.method == "isTelevision") {{
+                    val manager = getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+                    result.success(manager.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION)
+                }} else {{
+                    result.notImplemented()
+                }}
+            }}
+    }}
+}}
+""")
 
     os.makedirs("android/app/src/main/res/drawable", exist_ok=True)
     shutil.copy("assets/banner.png", "android/app/src/main/res/drawable/banner.png")

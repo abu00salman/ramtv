@@ -24,15 +24,26 @@ List<Item> parseM3U(M3UArgs a) {
   String? logo;
   String group = 'Other';
 
-  for (final raw in const LineSplitter().convert(a.text)) {
-    final line = raw.trim();
+  var firstLine = true;
+  for (final raw in LineSplitter.split(a.text)) {
+    final line = (firstLine ? raw.replaceFirst('\uFEFF', '') : raw).trim();
+    firstLine = false;
     if (line.startsWith('#EXTINF')) {
-      final idx = line.lastIndexOf(',');
+      // Metadata can contain commas in quoted attributes; titles can too.
+      var quoted = false;
+      var idx = -1;
+      for (var i = 0; i < line.length; i++) {
+        if (line[i] == '"') quoted = !quoted;
+        if (line[i] == ',' && !quoted) {
+          idx = i;
+          break;
+        }
+      }
       name = idx >= 0 ? line.substring(idx + 1).trim() : 'Channel';
       logo = _attr('tvg-logo', line);
       group = _attr('group-title', line) ?? 'Other';
     } else if (line.isNotEmpty && !line.startsWith('#') && name != null) {
-      final lower = line.toLowerCase();
+      final lower = (Uri.tryParse(line)?.path ?? line).toLowerCase();
       Kind kind;
       if (lower.contains('/series/')) {
         kind = Kind.series;
@@ -44,7 +55,7 @@ List<Item> parseM3U(M3UArgs a) {
       } else {
         kind = Kind.live;
       }
-      final nm = name!;
+      final nm = name;
       items.add(Item(
         id: '${kind.name}|$line',
         name: nm.isEmpty ? 'Channel' : nm,
@@ -86,25 +97,45 @@ List<Item> _autoGroup(List<Item> items) {
   return items;
 }
 
-Future<List<Item>> loadM3U(Source s) async {
+Future<List<Item>> loadM3U(Source s, {http.Client? client}) async {
   final uri = Uri.parse(s.url.trim());
-  final res = await http
-      .get(uri, headers: {'User-Agent': 'RaMtv/1.0'})
+  final res = await (client?.get(uri, headers: {'User-Agent': 'RaMtv/1.0'}) ??
+          http.get(uri, headers: {'User-Agent': 'RaMtv/1.0'}))
       .timeout(const Duration(seconds: 120));
   if (res.statusCode >= 400) {
     throw Exception('HTTP ${res.statusCode}');
   }
-  final text = utf8.decode(res.bodyBytes, allowMalformed: true);
-  return compute(parseM3U, M3UArgs(text, s.id));
+  return compute(_decodeM3U, _M3UBytes(res.bodyBytes, s.id));
 }
 
+class _M3UBytes {
+  final List<int> bytes;
+  final String sourceId;
+  const _M3UBytes(this.bytes, this.sourceId);
+}
+
+List<Item> _decodeM3U(_M3UBytes args) => parseM3U(
+    M3UArgs(utf8.decode(args.bytes, allowMalformed: true), args.sourceId));
+
+class _XtreamCatalogue {
+  final Source source;
+  final List<dynamic> responses;
+  const _XtreamCatalogue(this.source, this.responses);
+}
+
+List<Item> _parseXtreamCatalogue(_XtreamCatalogue args) =>
+    XtreamClient(args.source).parseCatalogue(args.responses, args.source.id);
+
 class XtreamClient {
+  final http.Client? client;
+  final Source source;
   final String base;
   final String user;
   final String pass;
 
-  XtreamClient(Source s)
-      : base = _norm(s.url),
+  XtreamClient(Source s, {this.client})
+      : source = s,
+        base = _norm(s.url),
         user = s.username,
         pass = s.password;
 
@@ -123,14 +154,18 @@ class XtreamClient {
 
   String _s(dynamic v) => v == null ? '' : v.toString();
 
-  Future<dynamic> call([String? action, Map<String, String> extra = const {}]) async {
+  Future<dynamic> call(
+      [String? action, Map<String, String> extra = const {}]) async {
     final q = <String, String>{'username': user, 'password': pass};
     if (action != null) q['action'] = action;
     q.addAll(extra);
     final uri = Uri.parse('$base/player_api.php').replace(queryParameters: q);
-    final res = await http
-        .get(uri, headers: {'User-Agent': 'RaMtv/1.0'})
+    final res = await (client?.get(uri, headers: {'User-Agent': 'RaMtv/1.0'}) ??
+            http.get(uri, headers: {'User-Agent': 'RaMtv/1.0'}))
         .timeout(const Duration(seconds: 120));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception('HTTP ${res.statusCode}');
+    }
     return compute(_decode, utf8.decode(res.bodyBytes, allowMalformed: true));
   }
 
@@ -170,6 +205,10 @@ class XtreamClient {
       _try('get_series'),
     ]);
 
+    return compute(_parseXtreamCatalogue, _XtreamCatalogue(source, results));
+  }
+
+  List<Item> parseCatalogue(List<dynamic> results, String sourceId) {
     final tag = sourceId.length > 8 ? sourceId.substring(0, 8) : sourceId;
     final out = <Item>[];
 
@@ -198,7 +237,9 @@ class XtreamClient {
         if (d is! Map) continue;
         final id = _s(d['stream_id']);
         if (id.isEmpty) continue;
-        final ext = _s(d['container_extension']).isEmpty ? 'mp4' : _s(d['container_extension']);
+        final ext = _s(d['container_extension']).isEmpty
+            ? 'mp4'
+            : _s(d['container_extension']);
         final icon = _s(d['stream_icon']);
         out.add(Item(
           id: '$tag-vod-$id',
@@ -240,7 +281,8 @@ class XtreamClient {
     final eps = root['episodes'];
     if (eps is Map) {
       eps.forEach((k, v) {
-        seasons.add(MapEntry(int.tryParse(k.toString()) ?? 0, v is List ? v : <dynamic>[]));
+        seasons.add(MapEntry(
+            int.tryParse(k.toString()) ?? 0, v is List ? v : <dynamic>[]));
       });
     } else if (eps is List) {
       for (var i = 0; i < eps.length; i++) {
@@ -254,7 +296,9 @@ class XtreamClient {
         if (e is! Map) continue;
         final id = _s(e['id']);
         if (id.isEmpty) continue;
-        final ext = _s(e['container_extension']).isEmpty ? 'mp4' : _s(e['container_extension']);
+        final ext = _s(e['container_extension']).isEmpty
+            ? 'mp4'
+            : _s(e['container_extension']);
         final title = _s(e['title']).isEmpty ? 'Episode' : _s(e['title']);
         out.add(Episode(
           id: id,
@@ -283,11 +327,19 @@ List<Item> demoItems(String sourceId) {
         sourceId: sourceId,
       );
   return [
-    mk('Apple Test Stream',
-        'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8', Kind.live),
-    mk('Mux Test Stream', 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', Kind.live),
-    mk('Sintel', 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8', Kind.movie),
-    mk('Apple BipBop 16:9',
-        'https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8', Kind.movie),
+    mk(
+        'Apple Test Stream',
+        'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8',
+        Kind.live),
+    mk('Mux Test Stream', 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        Kind.live),
+    mk(
+        'Sintel',
+        'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8',
+        Kind.movie),
+    mk(
+        'Apple BipBop 16:9',
+        'https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8',
+        Kind.movie),
   ];
 }

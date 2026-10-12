@@ -346,7 +346,7 @@ class ChannelRow extends StatelessWidget {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.18),
+                                color: Colors.white.withValues(alpha: 0.18),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(b, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
