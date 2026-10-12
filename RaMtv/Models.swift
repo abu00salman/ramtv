@@ -208,9 +208,9 @@ struct XtreamClient {
         return try JSONSerialization.jsonObject(with: data)
     }
 
-    private func categories(_ any: Any?) -> [String: String] {
+    private func categories(_ response: Any?) -> [String: String] {
         var m: [String: String] = [:]
-        for d in (any as? [[String: Any]]) ?? [] {
+        for d in (response as? [[String: Any]]) ?? [] {
             m[s(d["category_id"])] = s(d["category_name"])
         }
         return m
@@ -239,7 +239,7 @@ struct XtreamClient {
             let id = s(d["stream_id"])
             if id.isEmpty { continue }
             out.append(Item(id: "\(tag)-live-\(id)", name: s(d["name"]),
-                            logo: s(d["stream_icon"]).isEmpty ? nil : s(d["stream_icon"]),
+                            logo: ArtworkLookup.providerURL(s(d["stream_icon"]), base: base),
                             group: lcm[s(d["category_id"])] ?? "Live",
                             url: "\(base)/live/\(user)/\(pass)/\(id).m3u8",
                             kind: .live, seriesId: nil, sourceId: sourceId))
@@ -251,7 +251,7 @@ struct XtreamClient {
             if id.isEmpty { continue }
             let ext = s(d["container_extension"]).isEmpty ? "mp4" : s(d["container_extension"])
             out.append(Item(id: "\(tag)-vod-\(id)", name: s(d["name"]),
-                            logo: s(d["stream_icon"]).isEmpty ? nil : s(d["stream_icon"]),
+                            logo: ArtworkLookup.providerURL(s(d["stream_icon"]), base: base),
                             group: vcm[s(d["category_id"])] ?? "Movies",
                             url: "\(base)/movie/\(user)/\(pass)/\(id).\(ext)",
                             kind: .movie, seriesId: nil, sourceId: sourceId))
@@ -262,7 +262,7 @@ struct XtreamClient {
             let id = s(d["series_id"])
             if id.isEmpty { continue }
             out.append(Item(id: "\(tag)-series-\(id)", name: s(d["name"]),
-                            logo: s(d["cover"]).isEmpty ? nil : s(d["cover"]),
+                            logo: ArtworkLookup.providerURL(s(d["cover"]), base: base) ?? ArtworkLookup.providerURL(s(d["stream_icon"]), base: base),
                             group: scm[s(d["category_id"])] ?? "Series",
                             url: nil, kind: .series, seriesId: id, sourceId: sourceId))
         }

@@ -32,7 +32,7 @@ enum TitleCleaner {
     }
 
     static func normalize(_ raw: String) -> String {
-        var t = raw.lowercased()
+        var t = ArtworkLookup.channelName(raw).lowercased()
         t = t.replacingOccurrences(of: "^\\s*[\\[\\(|]*[a-z]{2,3}[\\]\\)|]*\\s*[|:\\-]\\s*", with: "", options: .regularExpression)
         t = t.replacingOccurrences(of: "\\(.*?\\)|\\[.*?\\]", with: " ", options: .regularExpression)
         t = t.replacingOccurrences(of: "\\b(hd|fhd|uhd|sd|4k|8k|hevc|h265|h264|1080p|720p|hq|backup|raw|tv|channel)\\b", with: " ", options: .regularExpression)
@@ -110,6 +110,8 @@ final class LogoIndex {
     private var map: [String: String] = [:]
     private(set) var ready = false
     private var tried = false
+    private var lastAttempt: Date?
+    private var generation = 0
     private var loading: Task<Void, Never>?
 
     private var fileURL: URL {
@@ -129,6 +131,10 @@ final class LogoIndex {
     }
 
     func reset() {
+        generation += 1
+        loading?.cancel()
+        loading = nil
+        lastAttempt = nil
         try? FileManager.default.removeItem(at: fileURL)
         map = [:]
         ready = false
@@ -136,7 +142,8 @@ final class LogoIndex {
     }
 
     private func ensureLoaded() async {
-        if ready || tried { return }
+        if ready { return }
+        if tried, let lastAttempt = lastAttempt, Date().timeIntervalSince(lastAttempt) < 60 { return }
         if let t = loading { await t.value; return }
         let t = Task { await self.load() }
         loading = t
@@ -145,13 +152,16 @@ final class LogoIndex {
     }
 
     private func load() async {
+        let generation = self.generation
+        lastAttempt = Date()
         if let d = try? Data(contentsOf: fileURL),
            let m = try? JSONDecoder().decode([String: String].self, from: d), !m.isEmpty {
             map = m
             ready = true
             return
         }
-        let built = await Task.detached(priority: .utility) { await LogoIndex.build() }.value
+        let built = await LogoIndex.build()
+        guard !Task.isCancelled, generation == self.generation else { return }
         tried = true
         if !built.isEmpty {
             map = built
@@ -164,16 +174,19 @@ final class LogoIndex {
         guard let url = URL(string: s) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 180)
         req.setValue("RaMtv/1.0", forHTTPHeaderField: "User-Agent")
-        guard let (d, _) = try? await URLSession.shared.data(for: req) else { return nil }
+        guard let (d, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return try? JSONSerialization.jsonObject(with: d)
     }
 
     nonisolated private static func build() async -> [String: String] {
-        let channels = await fetchJSON("https://iptv-org.github.io/api/channels.json")
-        let logos = await fetchJSON("https://iptv-org.github.io/api/logos.json")
+        async let channelsRequest = fetchJSON("https://iptv-org.github.io/api/channels.json")
+        async let logosRequest = fetchJSON("https://iptv-org.github.io/api/logos.json")
+        let (channels, logos) = await (channelsRequest, logosRequest)
         var best: [String: (String, Int)] = [:]
         for l in (logos as? [[String: Any]]) ?? [] {
-            guard let id = l["channel"] as? String, let url = l["url"] as? String else { continue }
+            guard let id = l["channel"] as? String, let url = l["url"] as? String,
+                  let imageURL = ArtworkLookup.validURL(url), imageURL.pathExtension.lowercased() != "svg" else { continue }
             let area = ((l["width"] as? Int) ?? 0) * ((l["height"] as? Int) ?? 0)
             if let cur = best[id], cur.1 >= area { continue }
             best[id] = (url, area)
@@ -197,13 +210,16 @@ final class LogoIndex {
 // MARK: - Artwork service (posters + logos)
 
 @MainActor
-final class ArtworkService {
+final class ArtworkService: ObservableObject {
+    @Published private(set) var generation = 0
     static let shared = ArtworkService()
 
     private var cache: [String: String] = [:]
     private var inflight: [String: Task<String?, Never>] = [:]
     private var dirty = 0
+    private var misses: [String: Date] = [:]
     private var nextSlot = Date.distantPast
+    private var nextSeriesSlot = Date.distantPast
 
     private var fileURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("artwork2.json")
@@ -216,10 +232,14 @@ final class ArtworkService {
 
     init() {
         if let d = try? Data(contentsOf: fileURL),
-           let m = try? JSONDecoder().decode([String: String].self, from: d) { cache = m }
+           let m = try? JSONDecoder().decode([String: String].self, from: d) { cache = m.filter { ArtworkLookup.validURL($0.value) != nil } }
     }
 
     func clear() {
+        generation += 1
+        for task in inflight.values { task.cancel() }
+        inflight.removeAll()
+        misses.removeAll()
         cache = [:]
         try? FileManager.default.removeItem(at: fileURL)
         LogoIndex.shared.reset()
@@ -227,14 +247,17 @@ final class ArtworkService {
 
     private func key(for item: Item) -> String {
         if item.kind == .live { return "l|" + TitleCleaner.normalize(LiveName.clean(item.name)) }
-        let p = TitleCleaner.parse(item.name)
+        let p = TitleCleaner.parse(item.kind == .series ? ArtworkLookup.seriesTitle(item.name) : item.name)
         return "\(item.kind.rawValue)|\(p.title.lowercased())|\(p.year ?? "")"
     }
 
-    func artwork(for item: Item) async -> String? {
+    func artwork(for item: Item, excluding failedURLs: Set<String> = []) async -> String? {
         let k = key(for: item)
-        if let c = cache[k] { return c.isEmpty ? nil : c }
+        if let c = cache[k], !failedURLs.contains(c) { return c }
+        cache[k] = nil
+        if let miss = misses[k], Date().timeIntervalSince(miss) < 300 { return nil }
         if let t = inflight[k] { return await t.value }
+        let generation = self.generation
         let task = Task { () -> String? in
             let r: (url: String?, cacheable: Bool)
             if item.kind == .live {
@@ -242,13 +265,18 @@ final class ArtworkService {
             } else {
                 r = await self.poster(for: item)
             }
-            if r.cacheable {
-                self.cache[k] = r.url ?? ""
+            guard !Task.isCancelled, self.generation == generation else { return nil }
+            let url = ArtworkLookup.validURL(r.url)?.absoluteString
+            if let url = url, !failedURLs.contains(url) {
+                self.cache[k] = url
+                self.misses[k] = nil
                 self.dirty += 1
                 if self.dirty >= 15 { self.dirty = 0; self.save() }
+            } else if r.cacheable {
+                self.misses[k] = Date()
             }
             self.inflight[k] = nil
-            return r.url
+            return url.flatMap { failedURLs.contains($0) ? nil : $0 }
         }
         inflight[k] = task
         return await task.value
@@ -263,11 +291,46 @@ final class ArtworkService {
     }
 
     private func poster(for item: Item) async -> (url: String?, cacheable: Bool) {
-        let p = TitleCleaner.parse(item.name)
+        let p = TitleCleaner.parse(item.kind == .series ? ArtworkLookup.seriesTitle(item.name) : item.name)
         if p.title.isEmpty { return (nil, true) }
         let key = tmdbKey
-        if !key.isEmpty { return await tmdb(p, series: item.kind == .series, key: key) }
+        if !key.isEmpty {
+            let result = await tmdb(p, series: item.kind == .series, key: key)
+            if result.url != nil { return result }
+        }
+        if item.kind == .series {
+            let result = await tvmaze(p)
+            if result.url != nil { return result }
+        }
         return await itunes(p, series: item.kind == .series)
+    }
+
+    private func tvmaze(_ title: ParsedTitle) async -> (url: String?, cacheable: Bool) {
+        let slot = max(Date(), nextSeriesSlot)
+        nextSeriesSlot = slot.addingTimeInterval(0.6)
+        let delay = slot.timeIntervalSinceNow
+        if delay > 0 {
+            do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            catch { return (nil, false) }
+        }
+        guard !Task.isCancelled,
+              var components = URLComponents(string: "https://api.tvmaze.com/singlesearch/shows") else { return (nil, false) }
+        components.queryItems = [URLQueryItem(name: "q", value: title.title)]
+        guard let url = components.url else { return (nil, false) }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 15))
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let show = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let name = show["name"] as? String,
+                  let images = show["image"] as? [String: Any] else { return (nil, false) }
+            let target = TitleCleaner.normalize(title.title)
+            let result = TitleCleaner.normalize(ArtworkLookup.seriesTitle(name))
+            guard !target.isEmpty, result.contains(target) || target.contains(result) else { return (nil, true) }
+            let image = (images["medium"] as? String) ?? (images["original"] as? String)
+            return (ArtworkLookup.validURL(image)?.absoluteString, true)
+        } catch {
+            return (nil, false)
+        }
     }
 
     private func tmdb(_ p: ParsedTitle, series: Bool, key: String) async -> (url: String?, cacheable: Bool) {
@@ -322,7 +385,8 @@ final class ArtworkService {
                   let results = root["results"] as? [[String: Any]] else { return (nil, false) }
             let target = TitleCleaner.normalize(p.title)
             let pick = results.first(where: {
-                let n = TitleCleaner.normalize(($0["trackName"] as? String) ?? ($0["collectionName"] as? String) ?? "")
+                let name = ($0["trackName"] as? String) ?? ($0["collectionName"] as? String) ?? ""
+                let n = TitleCleaner.normalize(series ? ArtworkLookup.seriesTitle(name) : name)
                 return !n.isEmpty && (n.contains(target) || target.contains(n))
             })
             guard let art = (pick?["artworkUrl100"] as? String) else { return (nil, true) }
@@ -340,7 +404,7 @@ struct ArtPlaceholder: View {
 
     private var hue: Double {
         let h = item.name.unicodeScalars.reduce(5381) { ($0 &* 33) &+ Int($1.value) }
-        return Double(abs(h) % 360) / 360
+        return Double(UInt(bitPattern: h) % 360) / 360
     }
 
     private var label: String {
@@ -370,23 +434,38 @@ struct ArtPlaceholder: View {
 struct ArtThumb: View {
     let item: Item
     var fit = false
+    @ObservedObject private var artwork = ArtworkService.shared
     @State private var resolved: String?
+    @State private var failedURLs = Set<String>()
+
+    private var lookupID: String {
+        "\(item.id)|\(item.logo ?? "")|\(artwork.generation)|\(failedURLs.sorted().joined(separator: "|"))"
+    }
+
+    private var imageURL: URL? {
+        if let provider = ArtworkLookup.validURL(item.logo), !failedURLs.contains(provider.absoluteString) {
+            return provider
+        }
+        if let fallback = ArtworkLookup.validURL(resolved), !failedURLs.contains(fallback.absoluteString) {
+            return fallback
+        }
+        return nil
+    }
 
     var body: some View {
-        let urlString = item.logo ?? resolved
         Group {
-            if let s = urlString, let u = makeURL(s) {
-                AsyncImage(url: u) { phase in
+            if let url = imageURL {
+                AsyncImage(url: url) { phase in
                     switch phase {
-                    case .success(let img):
+                    case .success(let image):
                         ZStack {
                             Color(white: 0.1)
-                            if fit {
-                                img.resizable().scaledToFit().padding(6)
-                            } else {
-                                img.resizable().scaledToFill()
-                            }
+                            if fit { image.resizable().scaledToFit().padding(6) }
+                            else { image.resizable().scaledToFill() }
                         }
+                    case .failure:
+                        ArtPlaceholder(item: item)
+                            .onAppear { failedURLs.insert(url.absoluteString) }
                     default:
                         ArtPlaceholder(item: item)
                     }
@@ -395,8 +474,11 @@ struct ArtThumb: View {
                 ArtPlaceholder(item: item)
             }
         }
-        .task(id: item.id) {
-            if item.logo == nil { resolved = await ArtworkService.shared.artwork(for: item) }
+        .task(id: lookupID) {
+            if let provider = ArtworkLookup.validURL(item.logo), !failedURLs.contains(provider.absoluteString) { return }
+            resolved = await artwork.artwork(for: item, excluding: failedURLs)
         }
+        .onChange(of: item.id) { _ in resolved = nil; failedURLs.removeAll() }
+        .onChange(of: artwork.generation) { _ in resolved = nil; failedURLs.removeAll() }
     }
 }

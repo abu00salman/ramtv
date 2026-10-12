@@ -154,6 +154,7 @@ struct PlayerScreen: View {
             topBar
         }
         .tint(.white)
+        .preferredColorScheme(.dark)
         .onAppear { PlayerHub.shared.finishRestore() }
         .sheet(isPresented: $showList) {
             ChannelPickerSheet(currentId: req.item?.id) { item in

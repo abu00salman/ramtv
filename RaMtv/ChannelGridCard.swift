@@ -11,7 +11,7 @@ struct ChannelGridCard: View {
                 ArtThumb(item: item, fit: true)
                     .frame(maxWidth: .infinity)
                     .aspectRatio(1, contentMode: .fit)
-                    .background(Color.white.opacity(0.04))
+                    .background(Color(uiColor: .secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: "play.fill")
@@ -39,6 +39,6 @@ struct ChannelGridCard: View {
             }
         }
         .padding(10)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
