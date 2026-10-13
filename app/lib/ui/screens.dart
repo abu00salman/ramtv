@@ -550,7 +550,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
               Pressable(
                 onTap: () {
                   final req = store.prepareEpisode(e, _eps, widget.item.displayTitle);
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(req: req)));
+                  return Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(req: req)));
                 },
                 child: ListTile(
                   leading: const Icon(Icons.play_circle_fill_rounded, color: kBrand),

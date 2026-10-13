@@ -18,6 +18,7 @@ void main() {
               onTap: () async {
                 taps++;
                 await Future<void>.delayed(const Duration(milliseconds: 50));
+                return null;
               },
               builder: (c, focused) => Text(focused ? 'focused' : 'idle'),
             ),
