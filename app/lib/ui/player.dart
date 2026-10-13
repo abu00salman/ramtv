@@ -11,6 +11,7 @@ import '../strings.dart';
 import '../text_utils.dart';
 import '../playback_queue.dart';
 import '../epg.dart';
+import '../perf.dart';
 import 'package:http/http.dart' as http;
 import 'widgets.dart';
 
@@ -69,11 +70,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _subs.add(player.stream.playing.listen((v) {
       _playing = v;
+      if (v && !_buffering && !_opening) Perf.firstFrame();
       _trackHealth();
       if (mounted) setState(() {});
     }));
     _subs.add(player.stream.buffering.listen((v) {
       _buffering = v;
+      if (v) {
+        Perf.rebuffer();
+      } else if (_playing && !_opening) {
+        Perf.firstFrame();
+      }
       _trackHealth();
       if (mounted) setState(() {});
     }));
@@ -145,6 +152,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // ------------------------------------------------------------ playback
 
   Future<void> _open(PlayRequest r) async {
+    Perf.openStart();
     _saveResume();
     _reconnectTimer?.cancel();
     _healthyTimer?.cancel();
@@ -238,6 +246,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _onError(String e) {
+    Perf.error();
     if (req.isLive) {
       _scheduleReconnect();
     } else if (mounted) {

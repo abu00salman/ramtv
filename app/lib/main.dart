@@ -3,11 +3,13 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
 import 'store.dart';
 import 'device_profile.dart';
+import 'perf.dart';
 import 'ui/screens.dart';
 import 'ui/widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  Perf.startFrameMonitor();
   MediaKit.ensureInitialized();
   await DeviceProfile.initialize();
   await store.init();

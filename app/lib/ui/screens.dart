@@ -7,6 +7,7 @@ import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
 import '../lan_add.dart';
+import '../perf.dart';
 import 'dpad.dart';
 import 'player.dart';
 import 'tv.dart';
@@ -715,6 +716,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: () => ArtworkService.instance.clear(),
             ),
             const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.speed_rounded),
+              title: const Text('Diagnostics'),
+              subtitle: const Text('Startup, channel switch, rebuffering, UI frames, memory'),
+              onTap: () => showDiagnostics(context),
+            ),
+            const SizedBox(height: 16),
             Text(t('About'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
             const SizedBox(height: 8),
             Text(
@@ -731,6 +739,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
+
+Future<void> showDiagnostics(BuildContext context) {
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Diagnostics'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final e in Perf.report())
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(flex: 5, child: Text(e.key, style: const TextStyle(color: Colors.white70))),
+                      Expanded(flex: 6, child: Text(e.value, style: const TextStyle(fontWeight: FontWeight.w600))),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () { Perf.reset(); Navigator.of(ctx).pop(); }, child: const Text('Reset')),
+        FilledButton(autofocus: true, onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
+      ],
+    ),
+  );
 }
 
 String _maskUrl(String u) => u.replaceAllMapped(
