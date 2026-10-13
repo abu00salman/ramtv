@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -234,6 +235,23 @@ class _LiveScreenState extends State<LiveScreen> {
   bool _favOnly = false;
 
   @override
+  void initState() {
+    super.initState();
+    _group = store.prefs.getString('live.group');
+    _favOnly = store.prefs.getBool('live.fav') ?? false;
+    if (_group != null && !store.liveGroups.contains(_group)) _group = null;
+  }
+
+  void _saveFilter() {
+    if (_group == null) {
+      store.prefs.remove('live.group');
+    } else {
+      store.prefs.setString('live.group', _group!);
+    }
+    store.prefs.setBool('live.fav', _favOnly);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: store,
@@ -270,25 +288,34 @@ class _LiveScreenState extends State<LiveScreen> {
                     if (i == 0) {
                       label = t('All');
                       selected = _group == null && !_favOnly;
-                      onTap = () => setState(() {
-                            _group = null;
-                            _favOnly = false;
-                          });
+                      onTap = () {
+                        setState(() {
+                          _group = null;
+                          _favOnly = false;
+                        });
+                        _saveFilter();
+                      };
                     } else if (i == 1) {
                       label = '♥ ${t('Favorites')}';
                       selected = _favOnly;
-                      onTap = () => setState(() {
-                            _favOnly = true;
-                            _group = null;
-                          });
+                      onTap = () {
+                        setState(() {
+                          _favOnly = true;
+                          _group = null;
+                        });
+                        _saveFilter();
+                      };
                     } else {
                       final g = groups[i - 2];
                       label = g;
                       selected = _group == g && !_favOnly;
-                      onTap = () => setState(() {
-                            _group = g;
-                            _favOnly = false;
-                          });
+                      onTap = () {
+                        setState(() {
+                          _group = g;
+                          _favOnly = false;
+                        });
+                        _saveFilter();
+                      };
                     }
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -580,19 +607,33 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _c = TextEditingController();
+  Timer? _debounce;
+  String _q = '';
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _c.dispose();
     super.dispose();
   }
 
+  String _kindLabel(Item i) {
+    switch (i.kind) {
+      case Kind.live:
+        return t('Live');
+      case Kind.movie:
+        return t('Movies');
+      case Kind.series:
+        return t('Series');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final q = _c.text.trim().toLowerCase();
+    final q = normalizeSearch(_q);
     final results = q.length < 2
         ? <Item>[]
-        : store.items.where((e) => e.name.toLowerCase().contains(q)).take(150).toList();
+        : store.items.where((e) => searchKey(e).contains(q)).take(150).toList();
     return SafeArea(
       child: Column(
         children: [
@@ -600,7 +641,12 @@ class _SearchScreenState extends State<SearchScreen> {
             padding: const EdgeInsets.all(16),
             child: DpadTextField(
               controller: _c,
-              onChanged: (_) => setState(() {}),
+              onChanged: (v) {
+                _debounce?.cancel();
+                _debounce = Timer(const Duration(milliseconds: 250), () {
+                  if (mounted) setState(() => _q = v);
+                });
+              },
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search_rounded),
                 hintText: t('Search channels, movies, series'),
@@ -627,8 +673,8 @@ class _SearchScreenState extends State<SearchScreen> {
                         child: ArtThumb(item: item, fit: item.kind == Kind.live),
                       ),
                     ),
-                    title: Text(item.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(item.group, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    title: Text(item.displayTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text('${_kindLabel(item)}  •  ${item.group}', maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
                 );
               },

@@ -654,11 +654,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             : store.live.where((e) => e.group == _browseGroup);
         break;
     }
-    final q = _query.text.trim().toLowerCase();
+    final q = normalizeSearch(_query.text);
     if (q.isNotEmpty) {
-      src = src.where((e) =>
-          e.name.toLowerCase().contains(q) ||
-          e.displayTitle.toLowerCase().contains(q));
+      src = src.where((e) => searchKey(e).contains(q));
     }
     return src.toList();
   }
