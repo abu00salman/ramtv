@@ -527,6 +527,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           store.prefs.remove('pref.audio');
           store.prefs.remove('pref.sub');
           _toast(t('OK'));
+          return null;
         },
       ),
     ];
@@ -652,6 +653,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onTap: () {
           ArtworkService.instance.clear();
           _toast(t('OK'));
+          return null;
         },
       ),
       _action(
@@ -670,6 +672,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onTap: () async {
           await themeController.resetAll();
           _toast(t('OK'));
+          return null;
         },
       ),
       Padding(
