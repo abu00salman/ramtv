@@ -123,7 +123,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _subs.add(player.stream.playing.listen((v) {
       _playing = v;
-      if (v && !_buffering && !_opening) Perf.firstFrame();
+      if (v && !_buffering && !_opening) {
+        Perf.firstFrame();
+        store.reportStream(true);
+      }
       _trackHealth();
       if (mounted) setState(() {});
     }));
@@ -133,6 +136,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         Perf.rebuffer();
       } else if (_playing && !_opening) {
         Perf.firstFrame();
+        store.reportStream(true);
       }
       _trackHealth();
       if (mounted) setState(() {});
@@ -161,6 +165,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     _open(req);
     _restartHide();
+    _focusAfterBuild('play');
   }
 
   void _updateDuration(Duration d) {
@@ -323,6 +328,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (req.isLive) {
       _scheduleReconnect();
     } else if (mounted) {
+      store.reportStream(false);
       setState(() {
         _failed = true;
         _message = t(
@@ -337,6 +343,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _healthyTimer = null;
     if (_reconnectTimer?.isActive ?? false) return;
     if (_retries >= 6) {
+      store.reportStream(false);
       setState(() {
         _failed = true;
         _message = t(
