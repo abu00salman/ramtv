@@ -687,7 +687,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       Padding(
         padding: EdgeInsets.fromLTRB(4 * s, 8 * s, 4 * s, 0),
         child: Text(
-          'This product uses the TMDB API but is not endorsed or certified by TMDB.   RaM tv 1.0',
+          'This product uses the TMDB API but is not endorsed or certified by TMDB.   RaM tv 2.1',
           style: TextStyle(fontSize: 13 * s, color: p.muted),
         ),
       ),

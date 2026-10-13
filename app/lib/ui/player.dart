@@ -954,6 +954,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         color: Colors.black.withValues(alpha: 0.65),
                         borderRadius: BorderRadius.circular(14 * s)),
                     child: Text(text,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                             fontSize: 26 * s,
                             fontWeight: FontWeight.w700,

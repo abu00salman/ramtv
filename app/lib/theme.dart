@@ -239,7 +239,7 @@ ThemeData buildTheme(Palette p) {
       side: BorderSide(color: p.border),
     ),
     snackBarTheme: SnackBarThemeData(
-      backgroundColor: p.surface,
+      backgroundColor: p.panelSolid,
       contentTextStyle: TextStyle(color: p.text, fontSize: 16),
       behavior: SnackBarBehavior.floating,
     ),
