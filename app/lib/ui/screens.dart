@@ -7,6 +7,8 @@ import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
 import '../lan_add.dart';
+import '../perf.dart';
+import '../theme.dart';
 import 'dpad.dart';
 import 'player.dart';
 import 'tv.dart';
@@ -91,7 +93,7 @@ class _RootScreenState extends State<RootScreen> {
               selectedIndex: _index,
               onDestinationSelected: (i) => setState(() => _index = i),
               labelType: NavigationRailLabelType.all,
-              backgroundColor: const Color(0xFF0B0B0B),
+              backgroundColor: Pal.current.panel,
               destinations: [
                 for (var i = 0; i < 5; i++)
                   NavigationRailDestination(icon: Icon(icons[i]), label: Text(labels[i])),
@@ -139,13 +141,13 @@ class EmptyState extends StatelessWidget {
                   height: 110,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(28),
-                    gradient: const LinearGradient(
+                    gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [kBrand, Color(0xFF081A96)],
+                      colors: [kBrand, kBrand.withValues(alpha: 0.6)],
                     ),
                   ),
-                  child: const Icon(Icons.live_tv_rounded, size: 56, color: Colors.white),
+                  child: Icon(Icons.live_tv_rounded, size: 56, color: Pal.current.onAccent),
                 ),
                 const SizedBox(height: 18),
                 Text(t('Welcome to RaM tv'),
@@ -154,7 +156,7 @@ class EmptyState extends StatelessWidget {
                 Text(
                   t('Add your own M3U playlist or server login to start watching. RaM tv is a player only and includes no channels or content.'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white60),
+                  style: TextStyle(color: Pal.of(context).muted),
                 ),
                 const SizedBox(height: 22),
                 FilledButton(
@@ -298,7 +300,7 @@ class _LiveScreenState extends State<LiveScreen> {
               ),
               Expanded(
                 child: list.isEmpty
-                    ? Center(child: Text(t('No channels'), style: const TextStyle(color: Colors.white54)))
+                    ? Center(child: Text(t('No channels'), style: TextStyle(color: Pal.of(context).muted)))
                     : ListView.builder(
                         itemCount: list.length,
                         itemExtent: isWide(context) ? 92 : 76,
@@ -361,7 +363,7 @@ class ChannelRow extends StatelessWidget {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
+                                color: Pal.current.text.withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(b, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
@@ -372,7 +374,7 @@ class ChannelRow extends StatelessWidget {
                     Text(item.group,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                        style: TextStyle(fontSize: 12, color: Pal.current.muted)),
                   ],
                 ),
               ),
@@ -380,7 +382,7 @@ class ChannelRow extends StatelessWidget {
                 onPressed: () => store.toggleFavorite(item),
                 icon: Icon(
                   store.isFavorite(item) ? Icons.favorite : Icons.favorite_border,
-                  color: store.isFavorite(item) ? kBrand : Colors.white54,
+                  color: store.isFavorite(item) ? kBrand : Pal.current.muted,
                 ),
               ),
             ],
@@ -539,7 +541,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
           const SizedBox(height: 16),
           if (_loading) const Center(child: CircularProgressIndicator()),
           if (!_loading && _eps.isEmpty)
-            Center(child: Text(t('No episodes'), style: const TextStyle(color: Colors.white54))),
+            Center(child: Text(t('No episodes'), style: TextStyle(color: Pal.of(context).muted))),
           for (final s in seasons) ...[
             Padding(
               padding: const EdgeInsets.only(top: 14, bottom: 6),
@@ -553,7 +555,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                   return Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(req: req)));
                 },
                 child: ListTile(
-                  leading: const Icon(Icons.play_circle_fill_rounded, color: kBrand),
+                  leading: Icon(Icons.play_circle_fill_rounded, color: kBrand),
                   title: Text('${e.number}. ${e.title}', maxLines: 2, overflow: TextOverflow.ellipsis),
                 ),
               ),
@@ -837,7 +839,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
                           const SizedBox(height: 6),
                           Text(
                             t('Scan the code or open the address in your phone browser (same Wi-Fi). Enter the PIN shown here.'),
-                            style: const TextStyle(fontSize: 12, color: Colors.white60),
+                            style: TextStyle(fontSize: 12, color: Pal.of(context).muted),
                           ),
                         ],
                       ),
@@ -845,7 +847,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
                   ],
                 ),
                 const Divider(height: 28),
-                Text(t('Or type it here'), style: const TextStyle(color: Colors.white60)),
+                Text(t('Or type it here'), style: TextStyle(color: Pal.of(context).muted)),
                 const SizedBox(height: 8),
               ],
               Center(

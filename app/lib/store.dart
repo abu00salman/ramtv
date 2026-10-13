@@ -344,6 +344,22 @@ class AppStore extends ChangeNotifier {
     return _startQueued(item);
   }
 
+  /// Confirms a channel chosen in the in-player browser. When [list] is given it becomes the zap queue.
+  PlayRequest? switchLive(Item item, {List<Item>? list}) {
+    if (list != null && list.isNotEmpty) queue = list;
+    final i = queue.indexWhere((e) => e.id == item.id);
+    if (i >= 0) queueIndex = i;
+    return _startQueued(item);
+  }
+
+  /// The live channel watched before the current one (for "previous channel").
+  Item? previousLive(String? currentId) {
+    for (final r in recents) {
+      if (r.kind == Kind.live && r.id != currentId) return r;
+    }
+    return null;
+  }
+
   PlayRequest? _startQueued(Item item) {
     final r = _request(item);
     if (r == null) return null;

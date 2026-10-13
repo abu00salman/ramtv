@@ -6,8 +6,10 @@ import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
 import '../device_profile.dart';
+import '../theme.dart';
 
-const Color kBrand = Color(0xFF0057FF);
+/// Current accent color (changes with the selected theme).
+Color get kBrand => Pal.current.accent;
 
 bool isWide(BuildContext c) =>
     DeviceProfile.isTelevision || MediaQuery.of(c).size.width >= 900;
@@ -18,6 +20,67 @@ typedef TapCb = Object? Function();
 
 bool _keyboardNavigation() =>
     FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+/// Handles the remote's OK/Enter key: immediate tap (default), long press, or repeat while held.
+/// Each physical press triggers exactly one action.
+class SelectKeyHandler {
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final void Function(int repeats)? onRepeat;
+  SelectKeyHandler({required this.onTap, this.onLongPress, this.onRepeat});
+
+  DateTime? _down;
+  bool _fired = false;
+  int _repeats = 0;
+
+  static bool isSelect(LogicalKeyboardKey k) =>
+      k == LogicalKeyboardKey.select ||
+      k == LogicalKeyboardKey.enter ||
+      k == LogicalKeyboardKey.numpadEnter;
+
+  KeyEventResult handle(KeyEvent e) {
+    if (!isSelect(e.logicalKey)) return KeyEventResult.ignored;
+    if (e is KeyDownEvent) {
+      _down = DateTime.now();
+      _fired = false;
+      _repeats = 0;
+      if (onLongPress == null) {
+        _fired = true;
+        onTap();
+      }
+      return KeyEventResult.handled;
+    }
+    if (e is KeyRepeatEvent) {
+      _repeats++;
+      final held = DateTime.now().difference(_down ?? DateTime.now());
+      if (onLongPress != null && !_fired && held >= const Duration(milliseconds: 550)) {
+        _fired = true;
+        onLongPress!();
+      } else if (onRepeat != null) {
+        onRepeat!(_repeats);
+      }
+      return KeyEventResult.handled;
+    }
+    if (e is KeyUpEvent) {
+      if (!_fired && onLongPress != null) onTap();
+      _down = null;
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+}
+
+/// Toggles a favorite and confirms with a short message.
+void toggleFavoriteWithToast(BuildContext context, Item item) {
+  final was = store.isFavorite(item);
+  store.toggleFavorite(item);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  messenger?.hideCurrentSnackBar();
+  messenger?.showSnackBar(SnackBar(
+    duration: const Duration(milliseconds: 1600),
+    content: Text(was ? t('Removed from favorites') : t('Added to favorites')),
+  ));
+}
 
 /// Focusable, tappable wrapper with a visible focus ring (works with touch, mouse and TV remote).
 class Pressable extends StatefulWidget {
@@ -73,7 +136,7 @@ class _PressableState extends State<Pressable> {
             foregroundDecoration: BoxDecoration(
               borderRadius: r,
               border: Border.all(
-                  color: _focused ? Colors.white : Colors.transparent,
+                  color: _focused ? Pal.of(context).focus : Colors.transparent,
                   width: 3),
             ),
             child: widget.child,
@@ -187,7 +250,7 @@ class _ArtThumbState extends State<ArtThumb> {
         if (frame == null && !sync) return placeholder;
         if (widget.fit) {
           return Container(
-              color: const Color(0xFF1A1A1A),
+              color: Pal.current.surface,
               padding: const EdgeInsets.all(6),
               child: child);
         }
@@ -205,21 +268,22 @@ class BadgeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final y = item.year;
+    final p = Pal.of(context);
     return Wrap(
       spacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         if (y != null)
           Text(y,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white70)),
+                  color: p.muted)),
         for (final b in item.badges)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.18),
+              color: p.text.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(b,
@@ -348,6 +412,7 @@ class HeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Pal.of(context);
     final live = item.kind == Kind.live;
     final height = isWide(context) ? 460.0 : 380.0;
     return SizedBox(
@@ -361,8 +426,8 @@ class HeroBanner extends StatelessWidget {
                 begin: Alignment.topRight,
                 end: Alignment.bottomLeft,
                 colors: [
-                  kBrand.withValues(alpha: 0.6),
-                  const Color(0xFF0A0A0A)
+                  p.accent.withValues(alpha: 0.6),
+                  p.bg,
                 ],
               ),
             ),
@@ -381,12 +446,12 @@ class HeroBanner extends StatelessWidget {
             )
           else
             ArtThumb(item: item, cacheWidth: 900),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.center,
                 end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Color(0xEB000000)],
+                colors: [p.bg.withValues(alpha: 0), p.bg.withValues(alpha: 0.92)],
               ),
             ),
           ),
@@ -399,16 +464,16 @@ class HeroBanner extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(_label.toUpperCase(),
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: Colors.white60)),
+                        color: p.muted)),
                 const SizedBox(height: 4),
                 Text(item.displayTitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 30, fontWeight: FontWeight.w800)),
+                    style: TextStyle(
+                        fontSize: 30, fontWeight: FontWeight.w800, color: p.text)),
                 const SizedBox(height: 6),
                 BadgeRow(item: item),
                 const SizedBox(height: 12),
@@ -417,8 +482,8 @@ class HeroBanner extends StatelessWidget {
                     FilledButton.icon(
                       onPressed: onPlay,
                       style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
+                        backgroundColor: p.accent,
+                        foregroundColor: p.onAccent,
                         padding: const EdgeInsets.symmetric(
                             horizontal: 26, vertical: 14),
                       ),
