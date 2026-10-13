@@ -12,10 +12,17 @@ const Color kBrand = Color(0xFF0057FF);
 bool isWide(BuildContext c) =>
     DeviceProfile.isTelevision || MediaQuery.of(c).size.width >= 900;
 
+/// Tap callback that may return a Future (e.g. a pushed route). When it does, focus is
+/// restored to the tapped element once the route is closed.
+typedef TapCb = Object? Function();
+
+bool _keyboardNavigation() =>
+    FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
 /// Focusable, tappable wrapper with a visible focus ring (works with touch, mouse and TV remote).
 class Pressable extends StatefulWidget {
   final Widget child;
-  final VoidCallback? onTap;
+  final TapCb? onTap;
   final double radius;
   const Pressable(
       {super.key, required this.child, this.onTap, this.radius = 14});
@@ -25,7 +32,20 @@ class Pressable extends StatefulWidget {
 }
 
 class _PressableState extends State<Pressable> {
+  final FocusNode _node = FocusNode();
   bool _focused = false;
+
+  @override
+  void dispose() {
+    _node.dispose();
+    super.dispose();
+  }
+
+  Future<void> _activate() async {
+    final r = widget.onTap?.call();
+    if (r is Future) await r;
+    if (mounted && _keyboardNavigation()) _node.requestFocus();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +55,8 @@ class _PressableState extends State<Pressable> {
         SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
       },
       child: InkWell(
-        onTap: widget.onTap,
+        focusNode: _node,
+        onTap: widget.onTap == null ? null : _activate,
         borderRadius: r,
         onFocusChange: (f) {
           setState(() => _focused = f);
@@ -212,7 +233,7 @@ class BadgeRow extends StatelessWidget {
 
 class PosterCard extends StatelessWidget {
   final Item item;
-  final VoidCallback onTap;
+  final TapCb onTap;
   final double? width;
   const PosterCard(
       {super.key, required this.item, required this.onTap, this.width});
@@ -266,7 +287,7 @@ class PosterCard extends StatelessWidget {
 class Shelf extends StatelessWidget {
   final String title;
   final List<Item> items;
-  final void Function(Item) onOpen;
+  final Object? Function(Item) onOpen;
   const Shelf(
       {super.key,
       required this.title,

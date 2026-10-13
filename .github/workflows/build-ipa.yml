@@ -22,8 +22,14 @@ jobs:
           cache: true
       - run: flutter pub get
         working-directory: app
-      - run: flutter analyze
+      - name: flutter analyze
         working-directory: app
+        run: |
+          set +e
+          flutter analyze 2>&1 | tee analyze.log
+          st=${PIPESTATUS[0]}
+          grep -E "^ *(error|warning|info) " analyze.log | head -40 | while IFS= read -r l; do echo "::error title=analyze::${l}"; done
+          exit $st
       - run: flutter test
         working-directory: app
       - run: python3 -m unittest discover -s ci/tests -v
@@ -110,7 +116,7 @@ jobs:
 
   release:
     needs: [quality, ios, android, windows, macos]
-    if: ${{ success() && github.ref == 'refs/heads/main' }}
+    if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/development/tv-')) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -124,6 +130,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+          target_commitish: ${{ github.sha }}
           name: RaM tv build ${{ github.run_number }}
           files: files/*
           body: |

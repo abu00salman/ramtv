@@ -21,6 +21,7 @@ class RamTvApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ThemeData(
       useMaterial3: true,
+      fontFamily: 'PlexArabic',
       brightness: Brightness.dark,
       colorScheme:
           ColorScheme.fromSeed(seedColor: kBrand, brightness: Brightness.dark)
@@ -43,9 +44,11 @@ class RamTvApp extends StatelessWidget {
       builder: (context, child) {
         final tv = DeviceProfile.isTelevision;
         if (!tv) return child!;
+        // Scale text with the screen height (540dp = 1x) so 1080p TVs at any density stay readable.
+        final h = MediaQuery.of(context).size.height;
+        final scale = (h / 540 * 1.1).clamp(1.15, 1.6).toDouble();
         return MediaQuery(
-          data: MediaQuery.of(context)
-              .copyWith(textScaler: const TextScaler.linear(1.15)),
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
           child: child!,
         );
       },
