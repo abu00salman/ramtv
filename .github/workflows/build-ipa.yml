@@ -110,7 +110,7 @@ jobs:
 
   release:
     needs: [quality, ios, android, windows, macos]
-    if: ${{ success() && github.ref == 'refs/heads/main' }}
+    if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/development/tv-')) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -124,6 +124,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+          target_commitish: ${{ github.sha }}
           name: RaM tv build ${{ github.run_number }}
           files: files/*
           body: |

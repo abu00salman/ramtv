@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 import 'paths.dart';
 import 'store.dart';
+import 'strings.dart' show isArabic;
 import 'text_utils.dart';
 
 const String _builtInTmdbKey = String.fromEnvironment('TMDB_KEY');
@@ -153,6 +154,13 @@ class LogoIndex {
   }
 }
 
+/// Backdrop image path + overview from TMDB (used by the TV home hero / cards).
+class ArtMeta {
+  final String? backdropPath;
+  final String? overview;
+  const ArtMeta(this.backdropPath, this.overview);
+}
+
 class ArtworkService {
   ArtworkService._();
   static final ArtworkService instance = ArtworkService._();
@@ -195,6 +203,55 @@ class ArtworkService {
       if (await f.exists()) await f.delete();
     } catch (_) {}
     await LogoIndex.instance.reset();
+  }
+
+  final Map<String, Future<ArtMeta?>> _metaCache = {};
+
+  /// Backdrop + overview for movies/series. Returns null without a TMDB key or for live channels.
+  Future<ArtMeta?> meta(Item item) {
+    if (item.kind == Kind.live) return Future<ArtMeta?>.value(null);
+    final key = _tmdbKey;
+    if (key.isEmpty) return Future<ArtMeta?>.value(null);
+    return _metaCache.putIfAbsent('${_key(item)}|meta', () => _fetchMeta(item, key));
+  }
+
+  Future<ArtMeta?> _fetchMeta(Item item, String key) async {
+    final p = TitleCleaner.parse(item.name);
+    if (p.title.isEmpty) return null;
+    final series = item.kind == Kind.series;
+    try {
+      var m = await _tmdbMeta(p.title, p.year, series, key, isArabic ? 'ar' : 'en-US');
+      if (isArabic && (m == null || (m.overview ?? '').isEmpty)) {
+        final en = await _tmdbMeta(p.title, p.year, series, key, 'en-US');
+        if (en != null) m = ArtMeta(m?.backdropPath ?? en.backdropPath, en.overview);
+      }
+      return m;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<ArtMeta?> _tmdbMeta(String title, String? year, bool series, String key, String lang) async {
+    final bearer = key.startsWith('eyJ');
+    final q = <String, String>{'query': title, 'language': lang};
+    if (year != null) q[series ? 'first_air_date_year' : 'year'] = year;
+    if (!bearer) q['api_key'] = key;
+    final uri = Uri.parse('https://api.themoviedb.org/3/search/${series ? 'tv' : 'movie'}')
+        .replace(queryParameters: q);
+    final headers = <String, String>{};
+    if (bearer) headers['Authorization'] = 'Bearer $key';
+    final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 20));
+    if (res.statusCode != 200) return null;
+    final root = jsonDecode(utf8.decode(res.bodyBytes));
+    final results = root is Map ? root['results'] : null;
+    if (results is! List) return null;
+    for (final r in results) {
+      if (r is Map && r['backdrop_path'] is String) {
+        return ArtMeta(r['backdrop_path'] as String, r['overview'] as String?);
+      }
+    }
+    if (year != null) return _tmdbMeta(title, null, series, key, lang);
+    return null;
   }
 
   String _key(Item item) {

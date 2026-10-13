@@ -9,16 +9,30 @@ import '../text_utils.dart';
 import '../lan_add.dart';
 import 'dpad.dart';
 import 'player.dart';
+import 'tv.dart';
 import 'widgets.dart';
 
-void openItem(BuildContext context, Item item, {List<Item>? list}) {
+Future<void> openItem(BuildContext context, Item item, {List<Item>? list}) async {
   if (item.seriesId != null) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SeriesDetailScreen(item: item)));
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SeriesDetailScreen(item: item)));
     return;
   }
   final req = store.prepare(item, list: list);
   if (req != null) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(req: req)));
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(req: req)));
+  }
+}
+
+/// Search as a full page (opened from the TV home search pill).
+class SearchPage extends StatelessWidget {
+  const SearchPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(t('Search'))),
+      body: const SearchScreen(),
+    );
   }
 }
 
@@ -42,6 +56,7 @@ class _RootScreenState extends State<RootScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (isWide(context)) return const TvShell();
     final pages = const [
       HomeScreen(),
       LiveScreen(),
@@ -303,7 +318,7 @@ class _LiveScreenState extends State<LiveScreen> {
 
 class ChannelRow extends StatelessWidget {
   final Item item;
-  final VoidCallback onTap;
+  final TapCb onTap;
   const ChannelRow({super.key, required this.item, required this.onTap});
 
   @override
@@ -379,14 +394,16 @@ class ChannelRow extends StatelessWidget {
 // ---------------------------------------------------------------- Library
 
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key});
+  /// 0 = movies only, 1 = series only, null = both with a switcher.
+  final int? fixedTab;
+  const LibraryScreen({super.key, this.fixedTab});
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  int _tab = 0;
+  late int _tab = widget.fixedTab ?? 0;
   String? _group;
 
   @override
@@ -407,7 +424,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(t('Library'),
+                      child: Text(
+                          t(widget.fixedTab == null ? 'Library' : (widget.fixedTab == 0 ? 'Movies' : 'Series')),
                           style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
                     ),
                     PopupMenuButton<String>(
@@ -421,6 +439,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ],
                 ),
               ),
+              if (widget.fixedTab == null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: SegmentedButton<int>(
