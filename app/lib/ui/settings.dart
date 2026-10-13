@@ -419,6 +419,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: t('Theme'),
         options: [
           (AppThemeMode.night, t('Night')),
+          (AppThemeMode.black, t('Black')),
+          (AppThemeMode.glass, t('Glass')),
           (AppThemeMode.day, t('Day')),
           (AppThemeMode.auto, t('Auto (device)')),
         ],

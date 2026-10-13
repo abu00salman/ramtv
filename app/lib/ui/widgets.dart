@@ -316,6 +316,37 @@ class BadgeRow extends StatelessWidget {
   }
 }
 
+/// Small red LIVE pill.
+class LiveBadge extends StatelessWidget {
+  final double scale;
+  const LiveBadge({super.key, this.scale = 1});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 7 * scale, vertical: 2 * scale),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE5233C),
+        borderRadius: BorderRadius.circular(6 * scale),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6 * scale,
+            height: 6 * scale,
+            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+          ),
+          SizedBox(width: 4 * scale),
+          Text('LIVE',
+              style: TextStyle(
+                  fontSize: 11 * scale, fontWeight: FontWeight.w800, color: Colors.white)),
+        ],
+      ),
+    );
+  }
+}
+
 class PosterCard extends StatelessWidget {
   final Item item;
   final TapCb onTap;
@@ -344,6 +375,19 @@ class PosterCard extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 ArtThumb(item: item, fit: live),
+                if (live)
+                  const PositionedDirectional(top: 6, end: 6, child: LiveBadge()),
+                if (store.isFavorite(item))
+                  PositionedDirectional(
+                    top: 6,
+                    start: 6,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                          color: Color(0x99000000), shape: BoxShape.circle),
+                      child: Icon(Icons.favorite_rounded, size: 16, color: Pal.current.accent),
+                    ),
+                  ),
                 if (frac != null)
                   Align(
                     alignment: Alignment.bottomCenter,
@@ -454,7 +498,7 @@ class HeroBanner extends StatelessWidget {
                 end: Alignment.bottomLeft,
                 colors: [
                   p.accent.withValues(alpha: 0.6),
-                  p.bg,
+                  p.base,
                 ],
               ),
             ),
@@ -478,7 +522,7 @@ class HeroBanner extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.center,
                 end: Alignment.bottomCenter,
-                colors: [p.bg.withValues(alpha: 0), p.bg.withValues(alpha: 0.92)],
+                colors: [p.base.withValues(alpha: 0), p.base.withValues(alpha: 0.92)],
               ),
             ),
           ),

@@ -75,11 +75,19 @@ class _RamTvAppState extends State<RamTvApp> with WidgetsBindingObserver {
           scale = (media.size.height / 540 * 1.1).clamp(1.15, 1.6).toDouble();
         }
         if (themeController.simple) scale *= 1.2;
-        if (scale == 1.0) return child!;
-        return MediaQuery(
-          data: media.copyWith(textScaler: TextScaler.linear(scale)),
-          child: child!,
-        );
+        Widget content = child!;
+        if (scale != 1.0) {
+          content = MediaQuery(
+            data: media.copyWith(textScaler: TextScaler.linear(scale)),
+            child: content,
+          );
+        }
+        if (palette.glass) {
+          content = Stack(
+            children: [const Positioned.fill(child: GlassBackground()), content],
+          );
+        }
+        return content;
       },
       home: const RootScreen(),
     );

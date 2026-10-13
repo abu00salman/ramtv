@@ -18,7 +18,7 @@ import '../theme.dart';
 import 'dpad.dart';
 import 'widgets.dart';
 
-enum _Aspect { fit, fill, original, stretch }
+enum _Aspect { fit, fill, zoom, zoomMax, ratio169, ratio43, original, stretch }
 
 enum _Menu { audio, subtitle, quality, aspect, speed, guide }
 
@@ -30,10 +30,15 @@ BoxFit _fitOf(_Aspect a) {
       return BoxFit.contain;
     case _Aspect.fill:
       return BoxFit.cover;
-    case _Aspect.original:
-      return BoxFit.scaleDown;
+    case _Aspect.zoom:
+    case _Aspect.zoomMax:
+      return BoxFit.contain;
+    case _Aspect.ratio169:
+    case _Aspect.ratio43:
     case _Aspect.stretch:
       return BoxFit.fill;
+    case _Aspect.original:
+      return BoxFit.scaleDown;
   }
 }
 
@@ -67,6 +72,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final ValueNotifier<Duration> _posN = ValueNotifier(Duration.zero);
   final ValueNotifier<Duration> _durN = ValueNotifier(Duration.zero);
   final ValueNotifier<String?> _hudN = ValueNotifier(null);
+  final ValueNotifier<int> _seekN = ValueNotifier(0);
+  Size _stageSize = Size.zero;
+  bool _seekPreview = false;
+  Timer? _previewTimer;
+  Timer? _hintTimer;
+  bool _showHint = false;
 
   bool _controlsVisible = true;
   _Menu? _menu;
@@ -117,6 +128,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final saved = store.prefs.getString('pref.aspect');
     _aspect = _Aspect.values
         .firstWhere((a) => a.name == saved, orElse: () => _Aspect.fit);
+    _showHint = store.prefs.getBool('hint.player') != true;
     player = Player();
     controller = VideoController(player);
     WakelockPlus.enable();
@@ -206,7 +218,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _reconnectTimer,
       _healthyTimer,
       _seekTimer,
-      _epgTicker
+      _epgTicker,
+      _previewTimer,
+      _hintTimer
     ]) {
       t?.cancel();
     }
@@ -224,6 +238,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _posN.dispose();
     _durN.dispose();
     _hudN.dispose();
+    _seekN.dispose();
     unawaited(_operations.close(player.dispose));
     super.dispose();
   }
@@ -398,12 +413,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ? 120
         : (_seekRepeat > 8 ? 60 : (_seekRepeat > 3 ? 30 : 10));
     _pendingSeek += sign * step;
-    _flash('${_pendingSeek > 0 ? '+' : ''}$_pendingSeek s');
+    _seekN.value = _pendingSeek;
+    if (!_controlsVisible) {
+      // Hidden controls: show a compact scrub bar so the position is always visible.
+      _previewTimer?.cancel();
+      _previewTimer = Timer(const Duration(milliseconds: 2800), () {
+        if (mounted) setState(() => _seekPreview = false);
+      });
+      if (!_seekPreview) setState(() => _seekPreview = true);
+    }
     _seekTimer?.cancel();
     _seekTimer = Timer(const Duration(milliseconds: 220), () {
       final delta = _pendingSeek;
       _pendingSeek = 0;
       _seekRepeat = 0;
+      _seekN.value = 0;
       _seekTo(_posN.value + Duration(seconds: delta));
     });
   }
@@ -454,7 +478,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // ------------------------------------------------------------ controls visibility
 
   void _showControls({String focusId = 'play'}) {
-    setState(() => _controlsVisible = true);
+    setState(() {
+      _controlsVisible = true;
+      _seekPreview = false;
+    });
     _restartHide();
     _focusAfterBuild(focusId);
   }
@@ -476,12 +503,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted) return;
     setState(() => _controlsVisible = false);
     _rootFocus.requestFocus();
+    if (_showHint && _hintTimer == null) {
+      _hintTimer = Timer(const Duration(seconds: 6), () {
+        store.prefs.setBool('hint.player', true);
+        if (mounted) setState(() => _showHint = false);
+      });
+    }
   }
 
   /// Controls stay visible while a sub-menu or the channel browser is open.
   void _restartHide() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 6), () {
+    _hideTimer = Timer(const Duration(seconds: 8), () {
       if (mounted &&
           _playing &&
           _controlsVisible &&
@@ -548,18 +581,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
             }),
         ];
       case _Menu.aspect:
-        final labels = {
-          _Aspect.fit: t('Fit'),
-          _Aspect.fill: t('Fill'),
-          _Aspect.original: t('Original'),
-          _Aspect.stretch: t('Stretch'),
-        };
         return [
           for (final a in _Aspect.values)
-            _Opt(labels[a]!, _aspect == a, () {
+            _Opt(_aspectLabel(a), _aspect == a, () {
               setState(() => _aspect = a);
               store.prefs.setString('pref.aspect', a.name);
               _closeMenu();
+              _flash('${_aspectLabel(a)}${_aspectNote(a)}');
             }),
         ];
       case _Menu.speed:
@@ -582,6 +610,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
         ];
     }
+  }
+
+  String _aspectLabel(_Aspect a) {
+    switch (a) {
+      case _Aspect.fit:
+        return t('Fit');
+      case _Aspect.fill:
+        return t('Fill');
+      case _Aspect.zoom:
+        return '${t('Zoom')} 1.2x';
+      case _Aspect.zoomMax:
+        return '${t('Zoom')} 1.45x';
+      case _Aspect.ratio169:
+        return '16:9';
+      case _Aspect.ratio43:
+        return '4:3';
+      case _Aspect.original:
+        return t('Original');
+      case _Aspect.stretch:
+        return t('Stretch');
+    }
+  }
+
+  /// Explains why a mode looks identical (e.g. a 16:9 video on a 16:9 screen).
+  String _aspectNote(_Aspect a) {
+    final w = player.state.width;
+    final h = player.state.height;
+    if (w == null || h == null || h == 0 || _stageSize.height == 0) return '';
+    final video = w / h;
+    final screen = _stageSize.width / _stageSize.height;
+    final same = (video - screen).abs() < 0.04;
+    final noEffect = a == _Aspect.fit ||
+        a == _Aspect.fill ||
+        a == _Aspect.stretch ||
+        a == _Aspect.original;
+    return (same && noEffect)
+        ? '\n${t('No visible change: the video already matches the screen')}'
+        : '';
   }
 
   String _hm(DateTime d) {
@@ -870,16 +936,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final winH = winW * 9 / 16;
     final winTop = 40.0 * s;
 
+    _stageSize = size;
     final video = Stack(
       fit: StackFit.expand,
       children: [
-        Video(
-          key: _videoKey,
-          controller: controller,
-          fit: _browsing ? BoxFit.contain : _fitOf(_aspect),
-          fill: Colors.black,
-          controls: _captureVideoState,
-        ),
+        _videoBox(),
         _statusOverlay(s),
         ValueListenableBuilder<String?>(
           valueListenable: _hudN,
@@ -918,6 +979,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
         if (!_browsing) Positioned.fill(child: _touchLayer(size)),
+        if (_seekPreview && !_controlsVisible && !_browsing && !req.isLive)
+          PositionedDirectional(
+            start: 0,
+            end: 0,
+            bottom: 0,
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [Color(0xF2000000), Color(0x00000000)],
+                ),
+              ),
+              padding: EdgeInsets.fromLTRB(40 * s, 60 * s, 40 * s, 26 * s),
+              child: _seekRow(p, s, interactive: false),
+            ),
+          ),
+        if (_showHint && !_controlsVisible && !_browsing && _menu == null)
+          PositionedDirectional(
+            start: 0,
+            end: 0,
+            bottom: 30 * s,
+            child: Center(
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 22 * s, vertical: 10 * s),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(22 * s),
+                ),
+                child: Text(
+                  req.isLive
+                      ? t('Press OK for controls, Up for channels')
+                      : t('Press OK for controls, Left/Right to seek'),
+                  style: TextStyle(fontSize: 18 * s, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
         if (_browsing) ...[
           PositionedDirectional(
               start: 0,
@@ -936,6 +1035,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (_menu != null) _menuPanel(p, s),
       ],
     );
+  }
+
+  Widget _videoBox() {
+    final mode = _browsing ? _Aspect.fit : _aspect;
+    final v = Video(
+      key: _videoKey,
+      controller: controller,
+      fit: _fitOf(mode),
+      fill: Colors.black,
+      controls: _captureVideoState,
+    );
+    switch (mode) {
+      case _Aspect.zoom:
+        return Transform.scale(scale: 1.2, child: v);
+      case _Aspect.zoomMax:
+        return Transform.scale(scale: 1.45, child: v);
+      case _Aspect.ratio169:
+        return Center(child: AspectRatio(aspectRatio: 16 / 9, child: v));
+      case _Aspect.ratio43:
+        return Center(child: AspectRatio(aspectRatio: 4 / 3, child: v));
+      default:
+        return v;
+    }
   }
 
   Widget _touchLayer(Size size) {
@@ -1033,10 +1155,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Color(0xCC000000), Color(0x00000000)],
+              colors: [Color(0xEB000000), Color(0x00000000)],
             ),
           ),
-          padding: EdgeInsets.fromLTRB(20 * s, 14 * s, 20 * s, 28 * s),
+          padding: EdgeInsets.fromLTRB(20 * s, 14 * s, 20 * s, 36 * s),
           child: Row(
             children: [
               _PBtn(
@@ -1093,10 +1215,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
               gradient: LinearGradient(
                 begin: Alignment.bottomCenter,
                 end: Alignment.topCenter,
-                colors: [Color(0xE6000000), Color(0x00000000)],
+                colors: [Color(0xF5000000), Color(0xB8000000), Color(0x00000000)],
+                stops: [0.0, 0.62, 1.0],
               ),
             ),
-            padding: EdgeInsets.fromLTRB(28 * s, 40 * s, 28 * s, 18 * s),
+            padding: EdgeInsets.fromLTRB(28 * s, 70 * s, 28 * s, 18 * s),
             child: FocusTraversalGroup(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1156,51 +1279,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ],
       );
     }
-    return ValueListenableBuilder<Duration>(
-      valueListenable: _durN,
-      builder: (context, dur, _) => ValueListenableBuilder<Duration>(
-        valueListenable: _posN,
-        builder: (context, pos, _) {
-          final total = dur.inMilliseconds;
-          final frac =
-              total <= 0 ? 0.0 : (pos.inMilliseconds / total).clamp(0.0, 1.0);
-          return Row(
-            children: [
-              Text(_fmt(pos),
-                  style: TextStyle(fontSize: 16 * s, color: Colors.white)),
-              SizedBox(width: 14 * s),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, c) => GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTapDown: (d) {
-                      if (total > 0) {
-                        final f =
-                            (d.localPosition.dx / c.maxWidth).clamp(0.0, 1.0);
-                        _seekTo(Duration(milliseconds: (total * f).round()));
-                      }
-                    },
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8 * s),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4 * s),
-                        child: LinearProgressIndicator(
-                          value: frac,
-                          minHeight: 6 * s,
-                          backgroundColor: Colors.white24,
-                          color: p.accent,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(width: 14 * s),
-              Text(_fmt(dur),
-                  style: TextStyle(fontSize: 16 * s, color: Colors.white70)),
-            ],
-          );
-        },
+    return _seekRow(p, s, interactive: true);
+  }
+
+  /// Thick scrub bar with a knob and a time bubble; always laid out left-to-right.
+  Widget _seekRow(Palette p, double s, {required bool interactive}) {
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: _SeekBar(
+        node: interactive ? _n('seek') : null,
+        pos: _posN,
+        dur: _durN,
+        pending: _seekN,
+        s: s,
+        accent: p.accent,
+        interactive: interactive,
+        fmt: _fmt,
+        onStep: (sign, repeat) => _seekAccumulate(sign, repeat: repeat),
+        onSeekTo: _seekTo,
       ),
     );
   }
@@ -1325,7 +1421,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _PBtn(
         node: _n('aspect'),
         icon: Icons.aspect_ratio_rounded,
-        label: t('Aspect ratio'),
+        label: _aspectLabel(_aspect),
         s: s,
         active: _menu == _Menu.aspect,
         onTap: () => _openMenu(_Menu.aspect, 'aspect'),
@@ -1338,6 +1434,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
           s: s,
           active: _menu == _Menu.speed,
           onTap: () => _openMenu(_Menu.speed, 'speed'),
+        ),
+      if (req.item != null)
+        _PBtn(
+          node: _n('fav'),
+          icon: store.isFavorite(req.item!)
+              ? Icons.favorite_rounded
+              : Icons.favorite_border_rounded,
+          label: store.isFavorite(req.item!)
+              ? t('Remove from favorites')
+              : t('Add to favorites'),
+          s: s,
+          active: store.isFavorite(req.item!),
+          onTap: () {
+            toggleFavoriteWithToast(context, req.item!);
+            setState(() {});
+          },
         ),
       if (_isDesktop)
         _PBtn(
@@ -1368,7 +1480,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       width: 360 * s,
       child: Container(
         decoration: BoxDecoration(
-          color: p.panel,
+          color: p.panelSolid,
           borderRadius: BorderRadius.circular(18 * s),
           border: Border.all(color: p.border),
         ),
@@ -1663,10 +1775,10 @@ class _PBtnState extends State<_PBtn> {
             if (widget.label != null) ...[
               SizedBox(height: 4 * s),
               SizedBox(
-                width: 110 * s,
+                width: 140 * s,
                 child: Text(widget.label!,
                     textAlign: TextAlign.center,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 14 * s,
@@ -1948,6 +2060,207 @@ class _BrowseRowState extends State<_BrowseRow> {
                       size: 24 * s, color: p.accent),
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SeekBar extends StatefulWidget {
+  final FocusNode? node;
+  final ValueNotifier<Duration> pos;
+  final ValueNotifier<Duration> dur;
+  final ValueNotifier<int> pending;
+  final double s;
+  final Color accent;
+  final bool interactive;
+  final String Function(Duration) fmt;
+  final void Function(int sign, bool repeat) onStep;
+  final void Function(Duration) onSeekTo;
+
+  const _SeekBar({
+    required this.node,
+    required this.pos,
+    required this.dur,
+    required this.pending,
+    required this.s,
+    required this.accent,
+    required this.interactive,
+    required this.fmt,
+    required this.onStep,
+    required this.onSeekTo,
+  });
+
+  @override
+  State<_SeekBar> createState() => _SeekBarState();
+}
+
+class _SeekBarState extends State<_SeekBar> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.s;
+    return Focus(
+      focusNode: widget.node,
+      canRequestFocus: widget.interactive,
+      skipTraversal: !widget.interactive,
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (node, e) {
+        if (!widget.interactive) return KeyEventResult.ignored;
+        if (e is! KeyDownEvent && e is! KeyRepeatEvent) {
+          return KeyEventResult.ignored;
+        }
+        final k = e.logicalKey;
+        if (k == LogicalKeyboardKey.arrowLeft ||
+            k == LogicalKeyboardKey.arrowRight) {
+          widget.onStep(k == LogicalKeyboardKey.arrowRight ? 1 : -1,
+              e is KeyRepeatEvent);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: ValueListenableBuilder<Duration>(
+        valueListenable: widget.dur,
+        builder: (context, dur, _) => ValueListenableBuilder<Duration>(
+          valueListenable: widget.pos,
+          builder: (context, pos, _) => ValueListenableBuilder<int>(
+            valueListenable: widget.pending,
+            builder: (context, pend, _) {
+              final total = dur.inMilliseconds;
+              double frac(int ms) =>
+                  total <= 0 ? 0.0 : (ms / total).clamp(0.0, 1.0);
+              final tgtMs = (pos.inMilliseconds + pend * 1000)
+                  .clamp(0, total > 0 ? total : 0)
+                  .toInt();
+              final cur = frac(pos.inMilliseconds);
+              final target = frac(tgtMs);
+              final showBubble = _focused || pend != 0;
+              final barH = (_focused ? 14 : 10) * s;
+              final knob = (_focused ? 28 : 20) * s;
+              final boxH = 64 * s;
+              final trackTop = (boxH - barH) / 2;
+              final lo = cur < target ? cur : target;
+              return Row(
+                children: [
+                  SizedBox(
+                    width: 78 * s,
+                    child: Text(widget.fmt(pos),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 18 * s,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white)),
+                  ),
+                  Expanded(
+                    child: LayoutBuilder(builder: (context, c) {
+                      final w = c.maxWidth;
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapDown: (d) {
+                          if (widget.interactive && total > 0) {
+                            final f = (d.localPosition.dx / w).clamp(0.0, 1.0);
+                            widget.onSeekTo(
+                                Duration(milliseconds: (total * f).round()));
+                          }
+                        },
+                        child: SizedBox(
+                          height: boxH,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: trackTop,
+                                height: barH,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.30),
+                                    borderRadius: BorderRadius.circular(barH),
+                                  ),
+                                ),
+                              ),
+                              if (pend != 0)
+                                Positioned(
+                                  left: lo * w,
+                                  width: (target - cur).abs() * w,
+                                  top: trackTop,
+                                  height: barH,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.6),
+                                      borderRadius: BorderRadius.circular(barH),
+                                    ),
+                                  ),
+                                ),
+                              Positioned(
+                                left: 0,
+                                width: cur * w,
+                                top: trackTop,
+                                height: barH,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: widget.accent,
+                                    borderRadius: BorderRadius.circular(barH),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                left: target * w - knob / 2,
+                                top: (boxH - knob) / 2,
+                                width: knob,
+                                height: knob,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: widget.accent, width: 4 * s),
+                                  ),
+                                ),
+                              ),
+                              if (showBubble)
+                                Positioned(
+                                  left: (target * w - 44 * s)
+                                      .clamp(0.0, (w - 88 * s).clamp(0.0, w)),
+                                  top: 0,
+                                  width: 88 * s,
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(vertical: 2 * s),
+                                    decoration: BoxDecoration(
+                                      color: widget.accent,
+                                      borderRadius: BorderRadius.circular(8 * s),
+                                    ),
+                                    child: Text(
+                                      widget.fmt(Duration(milliseconds: tgtMs)),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                          fontSize: 16 * s,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                  SizedBox(
+                    width: 78 * s,
+                    child: Text(widget.fmt(dur),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 18 * s,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white70)),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),

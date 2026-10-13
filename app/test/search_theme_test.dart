@@ -50,11 +50,16 @@ void main() {
     expect(auto.resolve(Brightness.dark).dark, isTrue);
     expect(auto.resolve(Brightness.light).dark, isFalse);
     for (final a in AppAccent.values) {
-      for (final pal in [Palette.night(a), Palette.day(a)]) {
-        expect(_contrast(pal.text, pal.bg), greaterThan(7));
-        expect(_contrast(pal.text, pal.panel), greaterThan(7));
+      for (final pal in [
+        Palette.night(a),
+        Palette.black(a),
+        Palette.glass(a),
+        Palette.day(a)
+      ]) {
+        expect(_contrast(pal.text, pal.base), greaterThan(7));
+        expect(_contrast(pal.text, pal.panelSolid), greaterThan(7));
         expect(_contrast(pal.onAccent, pal.accent), greaterThan(3));
-        expect(_contrast(pal.focus, pal.bg), greaterThan(7));
+        expect(_contrast(pal.focus, pal.base), greaterThan(7));
       }
     }
   });

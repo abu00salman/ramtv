@@ -233,10 +233,12 @@ class LiveScreen extends StatefulWidget {
 class _LiveScreenState extends State<LiveScreen> {
   String? _group;
   bool _favOnly = false;
+  String? _view; // 'cards' | 'list'; null = default for the device
 
   @override
   void initState() {
     super.initState();
+    _view = store.prefs.getString('live.view');
     _group = store.prefs.getString('live.group');
     _favOnly = store.prefs.getBool('live.fav') ?? false;
     if (_group != null && !store.liveGroups.contains(_group)) _group = null;
@@ -265,14 +267,34 @@ class _LiveScreenState extends State<LiveScreen> {
           list = store.live;
         }
         final groups = store.liveGroups;
+        final cards = (_view ?? (isWide(context) ? 'cards' : 'list')) == 'cards';
+        final gs = isWide(context) ? uiScale(context) : 1.0;
+        final extent = (isWide(context) ? 230 : 160) * gs;
         return SafeArea(
           child: Column(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text(t('Live'), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(t('Live'), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
+                          Text(t('Hold OK on a channel to add it to favorites'),
+                              style: TextStyle(fontSize: 13, color: Pal.of(context).muted)),
+                        ],
+                      ),
+                    ),
+                    _ViewToggle(
+                      cards: cards,
+                      onChange: (v) {
+                        setState(() => _view = v ? 'cards' : 'list');
+                        store.prefs.setString('live.view', _view!);
+                      },
+                    ),
+                  ],
                 ),
               ),
               SizedBox(
@@ -327,19 +349,81 @@ class _LiveScreenState extends State<LiveScreen> {
               Expanded(
                 child: list.isEmpty
                     ? Center(child: Text(t('No channels'), style: TextStyle(color: Pal.of(context).muted)))
-                    : ListView.builder(
-                        itemCount: list.length,
-                        itemExtent: isWide(context) ? 92 : 76,
-                        itemBuilder: (_, i) => ChannelRow(
-                          item: list[i],
-                          onTap: () => openItem(context, list[i], list: list),
-                        ),
-                      ),
+                    : cards
+                        ? GridView.builder(
+                            padding: EdgeInsets.all(16 * gs),
+                            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: extent,
+                              mainAxisExtent: extent / 1.6 + 44 * gs,
+                              crossAxisSpacing: 14 * gs,
+                              mainAxisSpacing: 14 * gs,
+                            ),
+                            itemCount: list.length,
+                            itemBuilder: (_, i) => PosterCard(
+                              item: list[i],
+                              onTap: () => openItem(context, list[i], list: list),
+                              onLongPress: () => toggleFavoriteWithToast(context, list[i]),
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: list.length,
+                            itemExtent: isWide(context) ? 92 : 76,
+                            itemBuilder: (_, i) => ChannelRow(
+                              item: list[i],
+                              onTap: () => openItem(context, list[i], list: list),
+                            ),
+                          ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _ViewToggle extends StatelessWidget {
+  final bool cards;
+  final ValueChanged<bool> onChange;
+  const _ViewToggle({required this.cards, required this.onChange});
+
+  Widget _btn(BuildContext context, IconData icon, String label, bool selected, VoidCallback tap) {
+    final p = Pal.of(context);
+    return Pressable(
+      radius: 20,
+      onTap: tap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? p.accent : p.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? p.accent : p.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: selected ? p.onAccent : p.text),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? p.onAccent : p.text)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _btn(context, Icons.grid_view_rounded, t('Cards'), cards, () => onChange(true)),
+        const SizedBox(width: 8),
+        _btn(context, Icons.view_list_rounded, t('List'), !cards, () => onChange(false)),
+      ],
     );
   }
 }
@@ -405,11 +489,19 @@ class ChannelRow extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                onPressed: () => store.toggleFavorite(item),
+              TextButton.icon(
+                onPressed: () => toggleFavoriteWithToast(context, item),
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                 icon: Icon(
-                  store.isFavorite(item) ? Icons.favorite : Icons.favorite_border,
+                  store.isFavorite(item) ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  size: 22,
                   color: store.isFavorite(item) ? kBrand : Pal.current.muted,
+                ),
+                label: Text(
+                  store.isFavorite(item) ? t('In favorites') : t('Add to favorites'),
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: store.isFavorite(item) ? kBrand : Pal.current.muted),
                 ),
               ),
             ],

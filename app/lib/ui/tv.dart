@@ -206,6 +206,7 @@ String _when(DateTime? d) {
 }
 
 Future<void> showStatusPanel(BuildContext context) {
+  if (store.internetOk == null && !store.checking) unawaited(store.checkConnection());
   return showDialog<void>(
     context: context,
     builder: (ctx) => const _StatusDialog(),
@@ -247,7 +248,7 @@ class _StatusDialog extends StatelessWidget {
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(textScaler: uiTextScaler()),
       child: Dialog(
-        backgroundColor: p.panel,
+        backgroundColor: p.panelSolid,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * s)),
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: 640 * s),
@@ -482,7 +483,7 @@ class _TvSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = tvScale(context);
     final p = Pal.of(context);
-    final width = MediaQuery.of(context).size.width * 0.19;
+    final width = MediaQuery.of(context).size.width * 0.215;
     final labels = [
       t('Home'),
       t('Channels'),
@@ -545,13 +546,16 @@ class _TvSidebar extends StatelessWidget {
                               size: 26 * s, color: selected ? p.onAccent : p.muted),
                           SizedBox(width: 14 * s),
                           Expanded(
-                            child: Text(labels[i],
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 20 * s,
-                                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                                    color: selected ? p.onAccent : p.text)),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: AlignmentDirectional.centerStart,
+                              child: Text(labels[i],
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                      fontSize: 20 * s,
+                                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                                      color: selected ? p.onAccent : p.text)),
+                            ),
                           ),
                         ],
                       ),
@@ -867,7 +871,7 @@ class _HeroSectionState extends State<_HeroSection> {
               gradient: LinearGradient(
                 begin: AlignmentDirectional.centerStart,
                 end: AlignmentDirectional.centerEnd,
-                colors: [p.bg.withValues(alpha: 0.92), p.bg.withValues(alpha: 0)],
+                colors: [p.base.withValues(alpha: 0.92), p.base.withValues(alpha: 0)],
                 stops: const [0.0, 0.75],
               ),
             ),
@@ -877,7 +881,7 @@ class _HeroSectionState extends State<_HeroSection> {
               gradient: LinearGradient(
                 begin: Alignment.center,
                 end: Alignment.bottomCenter,
-                colors: [p.bg.withValues(alpha: 0), p.bg],
+                colors: [p.base.withValues(alpha: 0), p.base],
               ),
             ),
           ),
@@ -1175,7 +1179,7 @@ class _ChannelCard extends StatelessWidget {
                 end: 10 * s,
                 bottom: 8 * s,
                 child: Text(item.displayTitle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 17 * s, fontWeight: FontWeight.w700, color: Colors.white)),
@@ -1230,6 +1234,11 @@ class FavoritesScreen extends StatelessWidget {
           return ListView(
             padding: EdgeInsets.only(bottom: 24 * s, top: 10 * s),
             children: [
+              Padding(
+                padding: EdgeInsetsDirectional.only(start: 40 * s, top: 6 * s),
+                child: Text(t('Hold OK on a channel to add it to favorites'),
+                    style: TextStyle(fontSize: 15 * s, color: p.muted)),
+              ),
               if (channels.isNotEmpty) ...[
                 _SectionTitle(t('Channels'), s),
                 Padding(
@@ -1315,7 +1324,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 gradient: LinearGradient(
                   begin: AlignmentDirectional.centerStart,
                   end: AlignmentDirectional.centerEnd,
-                  colors: [p.bg.withValues(alpha: 0.94), p.bg.withValues(alpha: 0.2)],
+                  colors: [p.base.withValues(alpha: 0.94), p.base.withValues(alpha: 0.2)],
                 ),
               ),
             ),

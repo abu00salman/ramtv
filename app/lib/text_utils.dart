@@ -29,6 +29,9 @@ class LiveName {
 
   static String clean(String s) {
     var t = prefixSplit(s).rest;
+    // "(1080)", "(720p)", "(HEVC)", "()" are noise in a channel name.
+    t = t.replaceAll(
+        RegExp(r'\(\s*(?:\d{3,4}p?|4k|fhd|uhd|hd|sd|hevc|h265)?\s*\)', caseSensitive: false), ' ');
     t = t.replaceAll(RegExp(r'\b(4k|uhd|fhd|hd|sd|hevc|h265)\b', caseSensitive: false), ' ');
     t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
     return t.isEmpty ? s : t;
