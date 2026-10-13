@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../artwork.dart';
@@ -83,12 +84,18 @@ void toggleFavoriteWithToast(BuildContext context, Item item) {
 }
 
 /// Focusable, tappable wrapper with a visible focus ring (works with touch, mouse and TV remote).
+/// With [onLongPress] the remote's OK key separates tap (on release) from hold.
 class Pressable extends StatefulWidget {
   final Widget child;
   final TapCb? onTap;
+  final VoidCallback? onLongPress;
   final double radius;
   const Pressable(
-      {super.key, required this.child, this.onTap, this.radius = 14});
+      {super.key,
+      required this.child,
+      this.onTap,
+      this.onLongPress,
+      this.radius = 14});
 
   @override
   State<Pressable> createState() => _PressableState();
@@ -97,6 +104,10 @@ class Pressable extends StatefulWidget {
 class _PressableState extends State<Pressable> {
   final FocusNode _node = FocusNode();
   bool _focused = false;
+  late final SelectKeyHandler _keys = SelectKeyHandler(
+    onTap: () => unawaited(_activate()),
+    onLongPress: widget.onLongPress == null ? null : () => widget.onLongPress!(),
+  );
 
   @override
   void dispose() {
@@ -113,36 +124,46 @@ class _PressableState extends State<Pressable> {
   @override
   Widget build(BuildContext context) {
     final r = BorderRadius.circular(widget.radius);
-    return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+    final ink = InkWell(
+      focusNode: _node,
+      onTap: widget.onTap == null ? null : () => unawaited(_activate()),
+      onLongPress: widget.onLongPress,
+      borderRadius: r,
+      onFocusChange: (f) {
+        setState(() => _focused = f);
+        if (f) {
+          Scrollable.ensureVisible(context,
+              duration: const Duration(milliseconds: 150), alignment: 0.5);
+        }
       },
-      child: InkWell(
-        focusNode: _node,
-        onTap: widget.onTap == null ? null : _activate,
-        borderRadius: r,
-        onFocusChange: (f) {
-          setState(() => _focused = f);
-          if (f) {
-            Scrollable.ensureVisible(context,
-                duration: const Duration(milliseconds: 150), alignment: 0.5);
-          }
-        },
-        child: AnimatedScale(
-          scale: _focused ? 1.04 : 1.0,
+      child: AnimatedScale(
+        scale: _focused ? 1.04 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            foregroundDecoration: BoxDecoration(
-              borderRadius: r,
-              border: Border.all(
-                  color: _focused ? Pal.of(context).focus : Colors.transparent,
-                  width: 3),
-            ),
-            child: widget.child,
+          foregroundDecoration: BoxDecoration(
+            borderRadius: r,
+            border: Border.all(
+                color: _focused ? Pal.of(context).focus : Colors.transparent,
+                width: 3),
           ),
+          child: widget.child,
         ),
       ),
+    );
+    if (widget.onLongPress == null) {
+      return Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        },
+        child: ink,
+      );
+    }
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, e) => _keys.handle(e),
+      child: ink,
     );
   }
 }
@@ -298,9 +319,14 @@ class BadgeRow extends StatelessWidget {
 class PosterCard extends StatelessWidget {
   final Item item;
   final TapCb onTap;
+  final VoidCallback? onLongPress;
   final double? width;
   const PosterCard(
-      {super.key, required this.item, required this.onTap, this.width});
+      {super.key,
+      required this.item,
+      required this.onTap,
+      this.onLongPress,
+      this.width});
 
   @override
   Widget build(BuildContext context) {
@@ -343,6 +369,7 @@ class PosterCard extends StatelessWidget {
     );
     return Pressable(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: width == null ? card : SizedBox(width: width, child: card),
     );
   }

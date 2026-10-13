@@ -1,16 +1,15 @@
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../artwork.dart';
 import '../models.dart';
 import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
 import '../lan_add.dart';
-import '../perf.dart';
 import '../theme.dart';
 import 'dpad.dart';
 import 'player.dart';
+import 'settings.dart';
 import 'tv.dart';
 import 'widgets.dart';
 
@@ -330,6 +329,7 @@ class ChannelRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Pressable(
         onTap: onTap,
+        onLongPress: () => toggleFavoriteWithToast(context, item),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
@@ -467,7 +467,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                   itemCount: shown.length,
                   itemBuilder: (_, i) =>
-                      PosterCard(item: shown[i], onTap: () => openItem(context, shown[i])),
+                      PosterCard(
+                          item: shown[i],
+                          onTap: () => openItem(context, shown[i]),
+                          onLongPress: () => toggleFavoriteWithToast(context, shown[i])),
                 ),
               ),
             ],
@@ -614,6 +617,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 final item = results[i];
                 return Pressable(
                   onTap: () => openItem(context, item),
+                  onLongPress: () => toggleFavoriteWithToast(context, item),
                   child: ListTile(
                     leading: SizedBox(
                       width: 52,
@@ -635,108 +639,6 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 }
-
-// ---------------------------------------------------------------- Settings
-
-class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController _tmdb;
-
-  @override
-  void initState() {
-    super.initState();
-    _tmdb = TextEditingController(text: store.prefs.getString('tmdbKey') ?? '');
-  }
-
-  @override
-  void dispose() {
-    _tmdb.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: store,
-      builder: (context, _) => SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(t('Settings'), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 16),
-            Text(t('Sources'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
-            for (final s in store.sources)
-              ListTile(
-                title: Text(s.name),
-                subtitle: Text(s.type == 'demo' ? t('Demo') : _maskUrl(s.url), maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  onPressed: () => store.removeSource(s.id),
-                ),
-              ),
-            ListTile(
-              leading: const Icon(Icons.add_circle_rounded, color: kBrand),
-              title: Text(t('Add Source')),
-              onTap: () => showAddSource(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.refresh_rounded),
-              title: Text(t('Refresh')),
-              trailing: store.loading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : null,
-              onTap: store.refresh,
-            ),
-            if (store.error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(store.error!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
-              ),
-            const SizedBox(height: 16),
-            Text(t('Artwork'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
-            const SizedBox(height: 8),
-            DpadTextField(
-              controller: _tmdb,
-              onChanged: (v) => store.prefs.setString('tmdbKey', v.trim()),
-              decoration: const InputDecoration(
-                labelText: 'TMDB API key (optional)',
-                helperText: 'Free key from themoviedb.org > Settings > API. Restart the app after adding it.',
-                helperMaxLines: 2,
-                border: OutlineInputBorder(),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.cleaning_services_rounded),
-              title: Text(t('Clear artwork cache')),
-              onTap: () => ArtworkService.instance.clear(),
-            ),
-            const SizedBox(height: 16),
-            Text(t('About'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
-            const SizedBox(height: 8),
-            Text(
-              t('RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access.'),
-              style: const TextStyle(fontSize: 12, color: Colors.white54),
-            ),
-            const SizedBox(height: 8),
-            const Text('This product uses the TMDB API but is not endorsed or certified by TMDB.',
-                style: TextStyle(fontSize: 11, color: Colors.white38)),
-            const SizedBox(height: 8),
-            const Text('RaM tv  1.0', style: TextStyle(color: Colors.white54)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-String _maskUrl(String u) => u.replaceAllMapped(
-    RegExp(r'(password|pass|pwd)=([^&]+)', caseSensitive: false), (m) => '${m.group(1)}=••••');
 
 Future<void> showAddSource(BuildContext context) {
   return showDialog<void>(context: context, builder: (_) => const _AddSourceDialog());

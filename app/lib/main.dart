@@ -66,6 +66,7 @@ class _RamTvAppState extends State<RamTvApp> with WidgetsBindingObserver {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [Locale('en'), Locale('ar')],
+      locale: themeController.lang == null ? null : Locale(themeController.lang!),
       builder: (context, child) {
         final media = MediaQuery.of(context);
         var scale = 1.0;

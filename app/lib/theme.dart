@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'strings.dart' as strings;
 
 enum AppThemeMode { night, day, auto }
 
@@ -84,6 +85,7 @@ class ThemeController extends ChangeNotifier {
   AppThemeMode mode = AppThemeMode.night;
   AppAccent accent = AppAccent.blue;
   bool simple = false;
+  String? lang; // null = follow device
   SharedPreferences? _prefs;
 
   void load(SharedPreferences p) {
@@ -93,6 +95,8 @@ class ThemeController extends ChangeNotifier {
     accent = AppAccent.values.firstWhere((e) => e.name == p.getString('theme.accent'),
         orElse: () => AppAccent.blue);
     simple = p.getBool('ui.simple') ?? false;
+    lang = p.getString('ui.lang');
+    strings.languageOverride = lang;
   }
 
   Palette resolve(Brightness platform) {
@@ -111,6 +115,29 @@ class ThemeController extends ChangeNotifier {
     accent = a;
     notifyListeners();
     await _prefs?.setString('theme.accent', a.name);
+  }
+
+  Future<void> setLang(String? v) async {
+    lang = v;
+    strings.languageOverride = v;
+    notifyListeners();
+    if (v == null) {
+      await _prefs?.remove('ui.lang');
+    } else {
+      await _prefs?.setString('ui.lang', v);
+    }
+  }
+
+  Future<void> resetAll() async {
+    mode = AppThemeMode.night;
+    accent = AppAccent.blue;
+    simple = false;
+    lang = null;
+    strings.languageOverride = null;
+    notifyListeners();
+    for (final k in ['theme.mode', 'theme.accent', 'ui.simple', 'ui.lang', 'pref.aspect', 'pref.audio', 'pref.sub']) {
+      await _prefs?.remove(k);
+    }
   }
 
   Future<void> setSimple(bool v) async {
