@@ -33,6 +33,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   bool _controlsVisible = true;
   Timer? _hideTimer;
+  // A popup menu owns key input while open; keep the controls up until it closes.
+  bool _menuOpen = false;
   Timer? _hudTimer;
   Timer? _reconnectTimer;
   Timer? _healthyTimer;
@@ -335,9 +337,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _restartHide() {
     _hideTimer?.cancel();
+    if (_menuOpen) return;
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _playing && _controlsVisible) _hideControls();
+      if (mounted && _playing && _controlsVisible && !_menuOpen) _hideControls();
     });
+  }
+
+  void _onMenuOpened() {
+    _menuOpen = true;
+    _hideTimer?.cancel();
+  }
+
+  void _onMenuClosed() {
+    _menuOpen = false;
+    if (mounted) _restartHide();
   }
 
   // ------------------------------------------------------------ keyboard / remote
@@ -745,7 +758,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return PopupMenuButton<dynamic>(
       icon: const Icon(Icons.subtitles_rounded),
       tooltip: '${t('Audio')} / ${t('Subtitles')}',
+      onOpened: _onMenuOpened,
+      onCanceled: _onMenuClosed,
       onSelected: (v) {
+        _onMenuClosed();
         if (v is AudioTrack) player.setAudioTrack(v);
         if (v is SubtitleTrack) player.setSubtitleTrack(v);
       },
@@ -774,7 +790,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return PopupMenuButton<BoxFit>(
       icon: const Icon(Icons.aspect_ratio_rounded),
       tooltip: t('Aspect'),
-      onSelected: (v) => setState(() => _fit = v),
+      onOpened: _onMenuOpened,
+      onCanceled: _onMenuClosed,
+      onSelected: (v) {
+        _onMenuClosed();
+        setState(() => _fit = v);
+      },
       itemBuilder: (_) => [
         PopupMenuItem(value: BoxFit.contain, child: Text(t('Fit'))),
         PopupMenuItem(value: BoxFit.cover, child: Text(t('Fill'))),
@@ -787,7 +808,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return PopupMenuButton<double>(
       icon: const Icon(Icons.speed_rounded),
       tooltip: t('Speed'),
+      onOpened: _onMenuOpened,
+      onCanceled: _onMenuClosed,
       onSelected: (v) {
+        _onMenuClosed();
         _rate = v;
         player.setRate(v);
         setState(() {});
