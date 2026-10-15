@@ -124,6 +124,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    FocusManager.instance.addListener(_keepFocusOnControls);
     req = widget.req;
     final saved = store.prefs.getString('pref.aspect');
     _aspect = _Aspect.values
@@ -228,6 +229,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       s.cancel();
     }
     WakelockPlus.disable();
+    FocusManager.instance.removeListener(_keepFocusOnControls);
     _rootFocus.dispose();
     _browseFocus.dispose();
     for (final n in _nodes.values) {
@@ -497,6 +499,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (play.context != null) play.requestFocus();
       }
     });
+  }
+
+  /// A focused button can unmount (e.g. "Previous channel" after a zap), which
+  /// leaves focus on a scope that never sees key events. Put focus back on the
+  /// transport so the remote keeps working while the controls are visible.
+  void _keepFocusOnControls() {
+    if (!mounted || !_controlsVisible || _menu != null || _browsing) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    final f = FocusManager.instance.primaryFocus;
+    if (f != null && f.context != null && _nodes.containsValue(f)) return;
+    _focusAfterBuild('play');
   }
 
   void _hideControls() {
