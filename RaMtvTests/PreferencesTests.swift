@@ -66,8 +66,8 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(fallback, url)
     }
 
-    func testMKVRetainsVLCPlayback() throws {
+    func testOtherContainersStartWithApplePlayerAndFallBackToVLC() throws {
         let url = try XCTUnwrap(URL(string: "https://example.test/movie.mkv"))
-        XCTAssertEqual(Engine.initial(for: PlayRequest(title: "Movie", url: url)), .vlc(url))
+        XCTAssertEqual(Engine.initial(for: PlayRequest(title: "Movie", url: url)), .av(url, fallback: url))
     }
 }
