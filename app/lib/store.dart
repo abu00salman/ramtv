@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show InternetAddress;
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -108,9 +109,126 @@ class AppStore extends ChangeNotifier {
   late SharedPreferences prefs;
   Map<String, List<double>> _resume = {};
 
+  // ---------- Source view / status / kids mode ----------
+
+  List<Item> _raw = [];
+  String? activeSourceId;
+  bool kidsMode = false;
+
+  /// Result of the last refresh per source id (true = refreshed fine). No URLs or credentials.
+  final Map<String, bool> sourceRefreshOk = {};
+  DateTime? lastRefreshAt;
+  bool? internetOk;
+  final Map<String, bool> sourceReachable = {};
+  DateTime? lastCheckAt;
+  bool? streamOk;
+  DateTime? streamAt;
+  bool checking = false;
+
+  void _loadView() {
+    activeSourceId = prefs.getString('activeSource');
+    kidsMode = prefs.getBool('kids.mode') ?? false;
+    final last = prefs.getInt('lastRefresh');
+    if (last != null) lastRefreshAt = DateTime.fromMillisecondsSinceEpoch(last);
+  }
+
+  Source? get activeSource {
+    for (final s in sources) {
+      if (s.id == activeSourceId) return s;
+    }
+    return sources.isNotEmpty ? sources.first : null;
+  }
+
+  void setActiveSource(String? id) {
+    activeSourceId = id;
+    if (id == null) {
+      prefs.remove('activeSource');
+    } else {
+      prefs.setString('activeSource', id);
+    }
+    _applyView();
+    notifyListeners();
+  }
+
+  bool get hasPin => (prefs.getString('kids.pin') ?? '').isNotEmpty;
+  bool checkPin(String pin) => pin == (prefs.getString('kids.pin') ?? '');
+  void setPin(String pin) => prefs.setString('kids.pin', pin);
+
+  void setKidsMode(bool on) {
+    kidsMode = on;
+    prefs.setBool('kids.mode', on);
+    _applyView();
+    notifyListeners();
+  }
+
+  static final RegExp _kidsGood = RegExp(
+      r'kid|cartoon|children|child|family|junior|baby|disney|nick|toon|أطفال|طفل|كرتون|عائل|بيبي|سبيستون|كراميش|طيور الجنة',
+      caseSensitive: false);
+  static final RegExp _kidsBad =
+      RegExp(r'xxx|adult|porn|18\+|erotic|sex', caseSensitive: false);
+
+  bool _kidsSafe(Item i) {
+    final text = '${i.group} ${i.name}';
+    return _kidsGood.hasMatch(text) && !_kidsBad.hasMatch(text);
+  }
+
+  void reportStream(bool ok) {
+    if (streamOk == ok && streamAt != null &&
+        DateTime.now().difference(streamAt!).inSeconds < 20) {
+      return;
+    }
+    streamOk = ok;
+    streamAt = DateTime.now();
+    notifyListeners();
+  }
+
+  /// Checks internet reachability and each source with light requests (no catalogue download).
+  Future<void> checkConnection() async {
+    if (checking) return;
+    checking = true;
+    notifyListeners();
+    try {
+      try {
+        final r = await InternetAddress.lookup('example.com')
+            .timeout(const Duration(seconds: 4));
+        internetOk = r.isNotEmpty;
+      } catch (_) {
+        internetOk = false;
+      }
+      sourceReachable.clear();
+      for (final s in List<Source>.of(sources)) {
+        if (s.type == 'demo') {
+          sourceReachable[s.id] = internetOk ?? false;
+          continue;
+        }
+        final c = _clientFactory();
+        try {
+          if (s.type == 'xtream') {
+            final res = await XtreamClient(s, client: c).call();
+            sourceReachable[s.id] = res is Map && res['user_info'] is Map;
+          } else {
+            final req = http.Request('GET', Uri.parse(s.url.trim()));
+            final res = await c.send(req).timeout(const Duration(seconds: 8));
+            await res.stream.listen((_) {}).cancel();
+            sourceReachable[s.id] = res.statusCode < 400;
+          }
+        } catch (_) {
+          sourceReachable[s.id] = false;
+        } finally {
+          c.close();
+        }
+      }
+      lastCheckAt = DateTime.now();
+    } finally {
+      checking = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> init() async {
     prefs = await SharedPreferences.getInstance();
     sources = _decodeSavedList(prefs.getString('sources'), Source.fromJson);
+    _loadView();
     favorites = (prefs.getStringList('favorites') ?? <String>[]).toSet();
     recents = _decodeSavedList(prefs.getString('recents'), Item.fromJson);
     final rs = prefs.getString('resume');
@@ -208,12 +326,14 @@ class AppStore extends ChangeNotifier {
           } else {
             all.addAll(demoItems(s.id));
           }
+          sourceRefreshOk[s.id] = true;
         } catch (_) {
           if (generation != _refreshGeneration) return;
+          sourceRefreshOk[s.id] = false;
           error =
               '${s.name}: Unable to refresh source. Check connection and credentials.';
           // Keep the last usable catalogue for an temporarily offline provider.
-          all.addAll(items.where((item) => item.sourceId == s.id));
+          all.addAll(_raw.where((item) => item.sourceId == s.id));
         }
         if (generation != _refreshGeneration) return;
       }
@@ -222,6 +342,7 @@ class AppStore extends ChangeNotifier {
       if (error == null) {
         prefs.setInt('lastRefresh', DateTime.now().millisecondsSinceEpoch);
         prefs.setInt('dataVersion', 3);
+        lastRefreshAt = DateTime.now();
       }
       notifyListeners();
       unawaited(_saveCache(all));
@@ -246,9 +367,16 @@ class AppStore extends ChangeNotifier {
   }
 
   void _setItems(List<Item> list) {
+    _raw = list;
+    _applyView();
+  }
+
+  void _applyView() {
     final seen = <String>{};
     final unique = <Item>[];
-    for (final i in list) {
+    for (final i in _raw) {
+      if (activeSourceId != null && i.sourceId != activeSourceId) continue;
+      if (kidsMode && !_kidsSafe(i)) continue;
       if (seen.add(i.id)) unique.add(i);
     }
     items = unique;
@@ -342,6 +470,22 @@ class AppStore extends ChangeNotifier {
     final i = queue.indexWhere((e) => e.id == item.id);
     if (i >= 0) queueIndex = i;
     return _startQueued(item);
+  }
+
+  /// Confirms a channel chosen in the in-player browser. When [list] is given it becomes the zap queue.
+  PlayRequest? switchLive(Item item, {List<Item>? list}) {
+    if (list != null && list.isNotEmpty) queue = list;
+    final i = queue.indexWhere((e) => e.id == item.id);
+    if (i >= 0) queueIndex = i;
+    return _startQueued(item);
+  }
+
+  /// The live channel watched before the current one (for "previous channel").
+  Item? previousLive(String? currentId) {
+    for (final r in recents) {
+      if (r.kind == Kind.live && r.id != currentId) return r;
+    }
+    return null;
   }
 
   PlayRequest? _startQueued(Item item) {

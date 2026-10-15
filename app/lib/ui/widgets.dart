@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../artwork.dart';
@@ -6,8 +7,10 @@ import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
 import '../device_profile.dart';
+import '../theme.dart';
 
-const Color kBrand = Color(0xFF0057FF);
+/// Current accent color (changes with the selected theme).
+Color get kBrand => Pal.current.accent;
 
 bool isWide(BuildContext c) =>
     DeviceProfile.isTelevision || MediaQuery.of(c).size.width >= 900;
@@ -19,13 +22,80 @@ typedef TapCb = Object? Function();
 bool _keyboardNavigation() =>
     FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
 
+/// Handles the remote's OK/Enter key: immediate tap (default), long press, or repeat while held.
+/// Each physical press triggers exactly one action.
+class SelectKeyHandler {
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final void Function(int repeats)? onRepeat;
+  SelectKeyHandler({required this.onTap, this.onLongPress, this.onRepeat});
+
+  DateTime? _down;
+  bool _fired = false;
+  int _repeats = 0;
+
+  static bool isSelect(LogicalKeyboardKey k) =>
+      k == LogicalKeyboardKey.select ||
+      k == LogicalKeyboardKey.enter ||
+      k == LogicalKeyboardKey.numpadEnter;
+
+  KeyEventResult handle(KeyEvent e) {
+    if (!isSelect(e.logicalKey)) return KeyEventResult.ignored;
+    if (e is KeyDownEvent) {
+      _down = DateTime.now();
+      _fired = false;
+      _repeats = 0;
+      if (onLongPress == null) {
+        _fired = true;
+        onTap();
+      }
+      return KeyEventResult.handled;
+    }
+    if (e is KeyRepeatEvent) {
+      _repeats++;
+      final held = DateTime.now().difference(_down ?? DateTime.now());
+      if (onLongPress != null && !_fired && held >= const Duration(milliseconds: 550)) {
+        _fired = true;
+        onLongPress!();
+      } else if (onRepeat != null) {
+        onRepeat!(_repeats);
+      }
+      return KeyEventResult.handled;
+    }
+    if (e is KeyUpEvent) {
+      if (!_fired && onLongPress != null) onTap();
+      _down = null;
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+}
+
+/// Toggles a favorite and confirms with a short message.
+void toggleFavoriteWithToast(BuildContext context, Item item) {
+  final was = store.isFavorite(item);
+  store.toggleFavorite(item);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  messenger?.hideCurrentSnackBar();
+  messenger?.showSnackBar(SnackBar(
+    duration: const Duration(milliseconds: 1600),
+    content: Text(was ? t('Removed from favorites') : t('Added to favorites')),
+  ));
+}
+
 /// Focusable, tappable wrapper with a visible focus ring (works with touch, mouse and TV remote).
+/// With [onLongPress] the remote's OK key separates tap (on release) from hold.
 class Pressable extends StatefulWidget {
   final Widget child;
   final TapCb? onTap;
+  final VoidCallback? onLongPress;
   final double radius;
   const Pressable(
-      {super.key, required this.child, this.onTap, this.radius = 14});
+      {super.key,
+      required this.child,
+      this.onTap,
+      this.onLongPress,
+      this.radius = 14});
 
   @override
   State<Pressable> createState() => _PressableState();
@@ -34,6 +104,10 @@ class Pressable extends StatefulWidget {
 class _PressableState extends State<Pressable> {
   final FocusNode _node = FocusNode();
   bool _focused = false;
+  late final SelectKeyHandler _keys = SelectKeyHandler(
+    onTap: () => unawaited(_activate()),
+    onLongPress: widget.onLongPress == null ? null : () => widget.onLongPress!(),
+  );
 
   @override
   void dispose() {
@@ -50,36 +124,46 @@ class _PressableState extends State<Pressable> {
   @override
   Widget build(BuildContext context) {
     final r = BorderRadius.circular(widget.radius);
-    return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+    final ink = InkWell(
+      focusNode: _node,
+      onTap: widget.onTap == null ? null : () => unawaited(_activate()),
+      onLongPress: widget.onLongPress,
+      borderRadius: r,
+      onFocusChange: (f) {
+        setState(() => _focused = f);
+        if (f) {
+          Scrollable.ensureVisible(context,
+              duration: const Duration(milliseconds: 150), alignment: 0.5);
+        }
       },
-      child: InkWell(
-        focusNode: _node,
-        onTap: widget.onTap == null ? null : _activate,
-        borderRadius: r,
-        onFocusChange: (f) {
-          setState(() => _focused = f);
-          if (f) {
-            Scrollable.ensureVisible(context,
-                duration: const Duration(milliseconds: 150), alignment: 0.5);
-          }
-        },
-        child: AnimatedScale(
-          scale: _focused ? 1.04 : 1.0,
+      child: AnimatedScale(
+        scale: _focused ? 1.04 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            foregroundDecoration: BoxDecoration(
-              borderRadius: r,
-              border: Border.all(
-                  color: _focused ? Colors.white : Colors.transparent,
-                  width: 3),
-            ),
-            child: widget.child,
+          foregroundDecoration: BoxDecoration(
+            borderRadius: r,
+            border: Border.all(
+                color: _focused ? Pal.of(context).focus : Colors.transparent,
+                width: 3),
           ),
+          child: widget.child,
         ),
       ),
+    );
+    if (widget.onLongPress == null) {
+      return Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        },
+        child: ink,
+      );
+    }
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, e) => _keys.handle(e),
+      child: ink,
     );
   }
 }
@@ -187,7 +271,7 @@ class _ArtThumbState extends State<ArtThumb> {
         if (frame == null && !sync) return placeholder;
         if (widget.fit) {
           return Container(
-              color: const Color(0xFF1A1A1A),
+              color: Pal.current.surface,
               padding: const EdgeInsets.all(6),
               child: child);
         }
@@ -205,21 +289,22 @@ class BadgeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final y = item.year;
+    final p = Pal.of(context);
     return Wrap(
       spacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         if (y != null)
           Text(y,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white70)),
+                  color: p.muted)),
         for (final b in item.badges)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.18),
+              color: p.text.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(b,
@@ -231,12 +316,48 @@ class BadgeRow extends StatelessWidget {
   }
 }
 
+/// Small red LIVE pill.
+class LiveBadge extends StatelessWidget {
+  final double scale;
+  const LiveBadge({super.key, this.scale = 1});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 7 * scale, vertical: 2 * scale),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE5233C),
+        borderRadius: BorderRadius.circular(6 * scale),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6 * scale,
+            height: 6 * scale,
+            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+          ),
+          SizedBox(width: 4 * scale),
+          Text('LIVE',
+              style: TextStyle(
+                  fontSize: 11 * scale, fontWeight: FontWeight.w800, color: Colors.white)),
+        ],
+      ),
+    );
+  }
+}
+
 class PosterCard extends StatelessWidget {
   final Item item;
   final TapCb onTap;
+  final VoidCallback? onLongPress;
   final double? width;
   const PosterCard(
-      {super.key, required this.item, required this.onTap, this.width});
+      {super.key,
+      required this.item,
+      required this.onTap,
+      this.onLongPress,
+      this.width});
 
   @override
   Widget build(BuildContext context) {
@@ -254,6 +375,19 @@ class PosterCard extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 ArtThumb(item: item, fit: live),
+                if (live)
+                  const PositionedDirectional(top: 6, end: 6, child: LiveBadge()),
+                if (store.isFavorite(item))
+                  PositionedDirectional(
+                    top: 6,
+                    start: 6,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                          color: Color(0x99000000), shape: BoxShape.circle),
+                      child: Icon(Icons.favorite_rounded, size: 16, color: Pal.current.accent),
+                    ),
+                  ),
                 if (frac != null)
                   Align(
                     alignment: Alignment.bottomCenter,
@@ -279,6 +413,7 @@ class PosterCard extends StatelessWidget {
     );
     return Pressable(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: width == null ? card : SizedBox(width: width, child: card),
     );
   }
@@ -348,6 +483,7 @@ class HeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Pal.of(context);
     final live = item.kind == Kind.live;
     final height = isWide(context) ? 460.0 : 380.0;
     return SizedBox(
@@ -361,8 +497,8 @@ class HeroBanner extends StatelessWidget {
                 begin: Alignment.topRight,
                 end: Alignment.bottomLeft,
                 colors: [
-                  kBrand.withValues(alpha: 0.6),
-                  const Color(0xFF0A0A0A)
+                  p.accent.withValues(alpha: 0.6),
+                  p.base,
                 ],
               ),
             ),
@@ -381,12 +517,12 @@ class HeroBanner extends StatelessWidget {
             )
           else
             ArtThumb(item: item, cacheWidth: 900),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.center,
                 end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Color(0xEB000000)],
+                colors: [p.base.withValues(alpha: 0), p.base.withValues(alpha: 0.92)],
               ),
             ),
           ),
@@ -399,16 +535,16 @@ class HeroBanner extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(_label.toUpperCase(),
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: Colors.white60)),
+                        color: p.muted)),
                 const SizedBox(height: 4),
                 Text(item.displayTitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 30, fontWeight: FontWeight.w800)),
+                    style: TextStyle(
+                        fontSize: 30, fontWeight: FontWeight.w800, color: p.text)),
                 const SizedBox(height: 6),
                 BadgeRow(item: item),
                 const SizedBox(height: 12),
@@ -417,8 +553,8 @@ class HeroBanner extends StatelessWidget {
                     FilledButton.icon(
                       onPressed: onPlay,
                       style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
+                        backgroundColor: p.accent,
+                        foregroundColor: p.onAccent,
                         padding: const EdgeInsets.symmetric(
                             horizontal: 26, vertical: 14),
                       ),
