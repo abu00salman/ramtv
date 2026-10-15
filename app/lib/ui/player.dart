@@ -58,6 +58,8 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
+  // Lets Android enter picture-in-picture when the user leaves while playing.
+  static const _pip = MethodChannel('ramtv/pip');
   late final Player player;
   late final VideoController controller;
   late PlayRequest req;
@@ -83,6 +85,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   _Menu? _menu;
   String _menuReturn = 'play';
   bool _browsing = false;
+  // Select's key-up from the press that opened the list must not confirm a row.
+  DateTime _browseOpenedAt = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _hideTimer;
   Timer? _hudTimer;
   Timer? _reconnectTimer;
@@ -136,6 +140,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _subs.add(player.stream.playing.listen((v) {
       _playing = v;
+      _pip.invokeMethod<void>('setPlaying', v).catchError((_) {});
       if (v && !_buffering && !_opening) {
         Perf.firstFrame();
         store.reportStream(true);
@@ -229,6 +234,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       s.cancel();
     }
     WakelockPlus.disable();
+    _pip.invokeMethod<void>('setPlaying', false).catchError((_) {});
     FocusManager.instance.removeListener(_keepFocusOnControls);
     _rootFocus.dispose();
     _browseFocus.dispose();
@@ -699,6 +705,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _enterBrowse() {
     if (!req.isLive) return;
     _hideTimer?.cancel();
+    _browseOpenedAt = DateTime.now();
     final list = _browseItems();
     final idx = list.indexWhere((e) => e.id == req.item?.id);
     final s = uiScale(context);
@@ -748,6 +755,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _confirmChannel(Item item, List<Item> list) {
+    if (DateTime.now().difference(_browseOpenedAt) <
+        const Duration(milliseconds: 600)) {
+      return;
+    }
     if (item.id == req.item?.id) {
       _exitBrowse();
       return;
