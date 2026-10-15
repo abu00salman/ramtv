@@ -29,7 +29,8 @@ enum Engine: Equatable {
             if EnginePrefs.get(url.host) == "vlc" { return .vlc(url) }
             return .av(url.appendingPathExtension("m3u8"), fallback: url)
         }
-        return .vlc(url)
+        // Apple's player first (PiP, AirPlay, system controls); VLC only if it fails to open.
+        return .av(url, fallback: url)
     }
 }
 
