@@ -38,34 +38,26 @@ if platform == "android":
         s,
         count=1,
         )
-    # Picture-in-picture: the activity must opt in before it can enter PiP.
-    if "supportsPictureInPicture" not in s:
-        s = re.sub(r"<activity\b", '<activity android:supportsPictureInPicture="true"', s, count=1)
     write(p, s)
 
     # Generated scaffolds are disposable; keep the TV bridge in this source script.
     import glob
     for activity in glob.glob("android/app/src/main/kotlin/**/MainActivity.kt", recursive=True):
         kotlin = read(activity)
-        if "ramtv/pip" in kotlin:
+        if "ramtv/device" in kotlin:
             continue
         package = re.search(r"^package\s+([\w.]+)", kotlin, re.MULTILINE)
         if package:
             write(activity, f"""package {package.group(1)}
 
-import android.app.PictureInPictureParams
 import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
-import android.os.Build
-import android.util.Rational
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {{
-    private var playing = false
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {{
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ramtv/device")
@@ -77,25 +69,6 @@ class MainActivity : FlutterActivity() {{
                     result.notImplemented()
                 }}
             }}
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ramtv/pip")
-            .setMethodCallHandler {{ call, result ->
-                if (call.method == "setPlaying") {{
-                    playing = call.arguments as? Boolean ?: false
-                    result.success(null)
-                }} else {{
-                    result.notImplemented()
-                }}
-            }}
-    }}
-
-    // Home (or any exit from the app) while a stream plays moves it into a PiP window.
-    override fun onUserLeaveHint() {{
-        super.onUserLeaveHint()
-        if (playing && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {{
-            enterPictureInPictureMode(
-                PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build()
-            )
-        }}
     }}
 }}
 """)

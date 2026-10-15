@@ -31,9 +31,6 @@ class AndroidPatchTest(unittest.TestCase):
             self.assertEqual(first, manifest.read_text())
             self.assertEqual(first_activity, activity.read_text())
             self.assertIn("Configuration.UI_MODE_TYPE_TELEVISION", first_activity)
-            self.assertIn("supportsPictureInPicture=\"true\"", first)
-            self.assertIn("onUserLeaveHint", first_activity)
-            self.assertEqual(first_activity.count("ramtv/pip"), 1)
             tree = ET.fromstring(first)
             ns = "{http://schemas.android.com/apk/res/android}"
             features = {e.get(ns + "name"): e.get(ns + "required")
