@@ -5,6 +5,8 @@ private let arabic: [String: String] = [
     "Stream unavailable. Check your connection or try another channel.": "البث غير متاح. تحقق من الاتصال أو جرّب قناة أخرى.",
     "Playback failed (stream not reachable or not supported)": "تعذّر تشغيل البث: غير متاح أو غير مدعوم.",
     "Pause": "إيقاف مؤقت",
+    "Diagnostics": "التشخيص", "Startup time": "زمن بدء التشغيل", "Recent plays": "آخر عمليات التشغيل",
+    "Clear": "مسح", "No plays yet": "لا توجد عمليات تشغيل بعد",
     "Series metadata: TVmaze": "بيانات المسلسلات: TVmaze",
     "Display mode": "وضع العرض", "Day mode": "وضع النهار", "Night mode": "وضع الليل",
     "Follow system": "حسب الجهاز",

@@ -55,7 +55,7 @@ struct HomeView: View {
                         ShelfView(title: t("Movies"), items: Array(store.movies.prefix(24)))
                         ShelfView(title: t("Series"), items: Array(store.series.prefix(24)))
                         ForEach(Array(store.liveGroups.prefix(5)), id: \.self) { g in
-                            ShelfView(title: g, items: Array(store.live.filter { $0.group == g }.prefix(20)))
+                            ShelfView(title: g, items: Array((store.liveByGroup[g] ?? []).prefix(20)))
                         }
                     }
                     .padding(.bottom, 24)
@@ -112,7 +112,7 @@ struct LiveView: View {
 
     private var filtered: [Item] {
         if favOnly { return store.live.filter { store.favorites.contains($0.id) } }
-        if let g = group { return store.live.filter { $0.group == g } }
+        if let g = group { return store.liveByGroup[g] ?? [] }
         return store.live
     }
 
@@ -284,12 +284,7 @@ struct SeriesDetailView: View {
 struct SearchView: View {
     @EnvironmentObject var store: AppStore
     @State private var query = ""
-
-    private var results: [Item] {
-        let q = query.trimmed
-        guard q.count >= 2 else { return [] }
-        return Array(store.items.filter { $0.name.localizedCaseInsensitiveContains(q) }.prefix(150))
-    }
+    @State private var results: [Item] = []
 
     var body: some View {
         NavigationStack {
@@ -302,6 +297,15 @@ struct SearchView: View {
             }
             .listStyle(.plain)
             .background(Color(uiColor: .systemBackground))
+            .task(id: query) {
+                let q = query
+                guard q.trimmed.count >= 2 else { results = []; return }
+                try? await Task.sleep(nanoseconds: 220_000_000)   // debounce typing
+                if Task.isCancelled { return }
+                let index = await store.searchIndex()
+                let found = await Task.detached(priority: .userInitiated) { index.search(q) }.value
+                if !Task.isCancelled { results = found }
+            }
             .navigationTitle(t("Search"))
             .quickAppearanceToggle()
             .searchable(text: $query, prompt: t("Search channels, movies, series"))
@@ -365,6 +369,11 @@ struct SettingsView: View {
                             Label(t("Refresh"), systemImage: "arrow.clockwise")
                             if store.loading { Spacer(); ProgressView() }
                         }
+                    }
+                }
+                Section {
+                    NavigationLink { DiagnosticsView() } label: {
+                        Label(t("Diagnostics"), systemImage: "speedometer")
                     }
                 }
                 if let e = store.error {

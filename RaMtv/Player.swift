@@ -11,6 +11,22 @@ enum EnginePrefs {
     static func set(_ value: String, host: String?) {
         UserDefaults.standard.set(value, forKey: "engine.\(host ?? "")")
     }
+
+    private static func failuresKey(_ host: String?) -> String { "engine.failures.\(host ?? "")" }
+
+    /// An HLS attempt worked: remember it and forget earlier failures.
+    static func recordAVSuccess(host: String?) {
+        set("av", host: host)
+        UserDefaults.standard.removeObject(forKey: failuresKey(host))
+    }
+
+    /// An HLS attempt failed. One slow or failed start must not condemn a host,
+    /// so VLC is remembered only after two failures in a row.
+    static func recordAVFailure(host: String?) {
+        let n = UserDefaults.standard.integer(forKey: failuresKey(host)) + 1
+        UserDefaults.standard.set(n, forKey: failuresKey(host))
+        if n >= 2 { set("vlc", host: host) }
+    }
 }
 
 enum Engine: Equatable {
@@ -23,6 +39,7 @@ enum Engine: Equatable {
         if ["m3u8", "mp4", "m4v", "mov"].contains(ext) { return .av(url, fallback: url) }
         // Xtream commonly offers HLS beside its TS endpoint. Retain VLC fallback.
         if r.isLive && ext == "ts" && url.path.contains("/live/") {
+            if EnginePrefs.get(url.host) == "vlc" { return .vlc(url) }
             return .av(url.deletingPathExtension().appendingPathExtension("m3u8"), fallback: url)
         }
         if ext.isEmpty && r.isLive {
@@ -138,9 +155,9 @@ struct PlayerScreen: View {
                     AVPlayerScreen(
                         url: url,
                         resumeKey: req.resumeKey,
-                        onReady: { if url != fb { EnginePrefs.set("av", host: fb.host) } },
+                        onReady: { if url != fb { EnginePrefs.recordAVSuccess(host: fb.host) } },
                         onFail: {
-                            if url != fb { EnginePrefs.set("vlc", host: fb.host) }
+                            if url != fb { EnginePrefs.recordAVFailure(host: fb.host) }
                             engine = .vlc(fb)
                         },
                         onEnded: { ended() },
@@ -271,6 +288,18 @@ final class AVModel: ObservableObject {
     private var onReadyHandler: () -> Void
     private var onFailHandler: () -> Void
     private var onEndedHandler: () -> Void
+    private let startedAt = CFAbsoluteTimeGetCurrent()
+    private var startLogged = false
+    private var watchdog: DispatchWorkItem?
+    private var playingObs: NSKeyValueObservation?
+
+    /// Records the start outcome once (first frame, failure or timeout).
+    private func logStart(_ outcome: String, detail: String = "") {
+        guard !startLogged else { return }
+        startLogged = true
+        PlaybackLog.record(engine: "AVPlayer", ms: Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000),
+                           outcome: outcome, detail: detail)
+    }
 
     func updateHandlers(onReady: @escaping () -> Void, onFail: @escaping () -> Void, onEnded: @escaping () -> Void) {
         onReadyHandler = onReady
@@ -294,7 +323,11 @@ final class AVModel: ObservableObject {
         obs = item.observe(\.status, options: [.new]) { [weak self] it, _ in
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                if it.status == .failed { self.onFailHandler() }
+                if it.status != .unknown { self.watchdog?.cancel() }
+                if it.status == .failed {
+                    self.logStart("failed")
+                    self.onFailHandler()
+                }
                 if it.status == .readyToPlay {
                     if !self.didResume {
                         self.didResume = true
@@ -319,10 +352,27 @@ final class AVModel: ObservableObject {
             if let key = resumeKey { ResumeStore.clear(key) }
             self?.onEndedHandler()
         }
+        playingObs = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
+            guard let self = self, p.timeControlStatus == .playing else { return }
+            DispatchQueue.main.async {
+                let s = p.currentItem?.presentationSize ?? .zero
+                self.logStart("ok", detail: s.width > 0 ? "\(Int(s.width))×\(Int(s.height))" : "")
+            }
+        }
+
+        // A server that never answers must not leave the screen loading forever.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.startLogged else { return }
+            self.logStart("timeout")
+            self.onFailHandler()
+        }
+        watchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
         player.play()
     }
 
     deinit {
+        watchdog?.cancel()
         if let o = timeObs { player.removeTimeObserver(o) }
         if let e = endObs { NotificationCenter.default.removeObserver(e) }
         if !PlayerHub.shared.isHolding(player) { player.pause() }
@@ -424,6 +474,14 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var lastBucket = -1
     private var retries = 0
     private var reconnectPending = false
+    private let startedAt = CFAbsoluteTimeGetCurrent()
+    private var startLogged = false
+
+    private func logStart(_ outcome: String) {
+        guard !startLogged else { return }
+        startLogged = true
+        PlaybackLog.record(engine: "VLC", ms: Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000), outcome: outcome)
+    }
 
     @Published var message = t("Loading") + "..."
     @Published var failed = false
@@ -554,6 +612,7 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         DispatchQueue.main.async {
             switch self.player.state {
             case .error:
+                self.logStart("failed")
                 if self.isLive {
                     self.reconnect()
                 } else {
@@ -570,6 +629,7 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             case .opening, .buffering:
                 if !self.player.isPlaying && !self.reconnectPending { self.message = t("Loading") + "..." }
             case .playing:
+                self.logStart("ok")
                 self.retries = 0
                 self.message = ""
                 self.failed = false

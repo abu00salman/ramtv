@@ -9,6 +9,9 @@ final class AppStore: ObservableObject {
     @Published private(set) var movies: [Item] = []
     @Published private(set) var series: [Item] = []
     @Published private(set) var liveGroups: [String] = []
+    private(set) var liveByGroup: [String: [Item]] = [:]
+    private var itemsVersion = 0
+    private var indexCache: (version: Int, index: SearchIndex)?
     @Published var favorites: Set<String> = []
     @Published var recents: [Item] = []
     @Published var loading = false
@@ -112,12 +115,10 @@ final class AppStore: ObservableObject {
 
     // MARK: Playback
 
-    private func makeRequest(_ item: Item) -> PlayRequest? {
-        guard var s = item.url else { return nil }
-        if item.kind == .live, s.contains("/live/"), s.hasSuffix(".ts") {
-            s = String(s.dropLast(3)) + ".m3u8"
-        }
-        guard let u = makeURL(s) else { return nil }
+    /// The URL stays exactly as the source provides it. `Engine.initial` decides whether to try HLS first
+    /// and keeps the original URL as the VLC fallback.
+    func makeRequest(_ item: Item) -> PlayRequest? {
+        guard let s = item.url, let u = makeURL(s) else { return nil }
         return PlayRequest(title: item.displayTitle, url: u, isLive: item.kind == .live, item: item,
                            resumeKey: item.kind == .live ? nil : item.id)
     }
@@ -132,7 +133,7 @@ final class AppStore: ObservableObject {
     func play(_ item: Item, in list: [Item]? = nil) {
         guard let req = makeRequest(item) else { return }
         if item.kind == .live {
-            queue = list ?? live.filter { $0.group == item.group }
+            queue = list ?? (liveByGroup[item.group] ?? [])
             queueIndex = queue.firstIndex(where: { $0.id == item.id }) ?? 0
         } else {
             queue = []
@@ -227,5 +228,17 @@ final class AppStore: ObservableObject {
             if seen.insert(i.group).inserted { groups.append(i.group) }
         }
         liveGroups = groups
+        liveByGroup = Dictionary(grouping: live, by: { $0.group })
+        itemsVersion += 1
+    }
+
+    /// Search index built off the main thread and cached until the catalogue changes.
+    func searchIndex() async -> SearchIndex {
+        if let c = indexCache, c.version == itemsVersion { return c.index }
+        let snapshot = items
+        let version = itemsVersion
+        let index = await Task.detached(priority: .userInitiated) { SearchIndex(items: snapshot) }.value
+        if version == itemsVersion { indexCache = (version, index) }
+        return index
     }
 }
