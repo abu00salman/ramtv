@@ -59,7 +59,9 @@ enum LiveName {
 
     static func clean(_ s: String) -> String {
         var t = prefixSplit(s).rest
-        t = t.replacingOccurrences(of: "\\b(4k|uhd|fhd|hd|sd|hevc|h265)\\b", with: " ", options: [.regularExpression, .caseInsensitive])
+        t = t.replacingOccurrences(of: "\\b(4k|uhd|fhd|hd|sd|hevc|h265|\\d{3,4}p|2160|1080|720|540)\\b", with: " ", options: [.regularExpression, .caseInsensitive])
+        // Brackets left empty once quality tags are gone, e.g. "BeIN Sport 01 (FHD)".
+        t = t.replacingOccurrences(of: "[\\(\\[]\\s*[\\)\\]]", with: " ", options: .regularExpression)
         t = t.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmed
         return t.isEmpty ? s : t
     }

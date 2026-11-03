@@ -85,4 +85,10 @@ final class IPhone2Tests: XCTestCase {
         XCTAssertEqual(session.tiles[1]?.player.isMuted, false)
         session.stopAll()
     }
+
+    func testQualityTagsAndEmptyBracketsAreRemovedFromChannelNames() {
+        XCTAssertEqual(LiveName.clean("BeIN Sport 01 (FHD)"), "BeIN Sport 01")
+        XCTAssertEqual(LiveName.clean("beIN Sports (A): BeIN Sport 02 [1080p]"), "BeIN Sport 02")
+        XCTAssertEqual(LiveName.clean("MBC 1 HD"), "MBC 1")
+    }
 }

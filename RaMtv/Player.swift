@@ -237,7 +237,8 @@ struct PlayerScreen: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        // Apple's player draws its own buttons in the top row; sit below them.
+        .padding(.top, isAV ? 64 : 8)
         .opacity(isAV || showChrome ? 1 : 0)
         .animation(.easeInOut(duration: 0.2), value: showChrome)
     }
@@ -292,6 +293,18 @@ final class AVModel: ObservableObject {
     /// without reporting an error would otherwise stay black.
     static let startupTimeout: TimeInterval = 20
 
+    /// Apple's player can report "ready" for streams it decodes audio-only (some HEVC live
+    /// channels): sound with a black screen. Hand those to VLC as well.
+    private func checkPictureSoon() {
+        let check = DispatchWorkItem { [weak self] in
+            guard let self = self, let item = self.player.currentItem,
+                  item.status == .readyToPlay, item.presentationSize == .zero else { return }
+            self.fail()
+        }
+        watchdog = check
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: check)
+    }
+
     private func fail() {
         guard !reportedFailure else { return }
         reportedFailure = true
@@ -324,6 +337,7 @@ final class AVModel: ObservableObject {
                 if it.status == .failed { self.fail() }
                 if it.status == .readyToPlay {
                     self.watchdog?.cancel()
+                    self.checkPictureSoon()
                     if !self.didResume {
                         self.didResume = true
                         if let key = resumeKey, let r = ResumeStore.get(key), r.seconds > 20 {
