@@ -51,7 +51,10 @@ class SelectKeyHandler {
       }
       return KeyEventResult.handled;
     }
+    // A press that started on another widget (e.g. the button that opened this
+    // list) must not act here when it repeats or is released.
     if (e is KeyRepeatEvent) {
+      if (_down == null) return KeyEventResult.handled;
       _repeats++;
       final held = DateTime.now().difference(_down ?? DateTime.now());
       if (onLongPress != null && !_fired && held >= const Duration(milliseconds: 550)) {
@@ -63,8 +66,9 @@ class SelectKeyHandler {
       return KeyEventResult.handled;
     }
     if (e is KeyUpEvent) {
-      if (!_fired && onLongPress != null) onTap();
+      final began = _down != null;
       _down = null;
+      if (began && !_fired && onLongPress != null) onTap();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
