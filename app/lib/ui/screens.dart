@@ -1,14 +1,16 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../artwork.dart';
 import '../models.dart';
 import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
 import '../lan_add.dart';
+import '../theme.dart';
 import 'dpad.dart';
 import 'player.dart';
+import 'settings.dart';
 import 'tv.dart';
 import 'widgets.dart';
 
@@ -91,7 +93,7 @@ class _RootScreenState extends State<RootScreen> {
               selectedIndex: _index,
               onDestinationSelected: (i) => setState(() => _index = i),
               labelType: NavigationRailLabelType.all,
-              backgroundColor: const Color(0xFF0B0B0B),
+              backgroundColor: Pal.current.panel,
               destinations: [
                 for (var i = 0; i < 5; i++)
                   NavigationRailDestination(icon: Icon(icons[i]), label: Text(labels[i])),
@@ -139,13 +141,13 @@ class EmptyState extends StatelessWidget {
                   height: 110,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(28),
-                    gradient: const LinearGradient(
+                    gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [kBrand, Color(0xFF081A96)],
+                      colors: [kBrand, kBrand.withValues(alpha: 0.6)],
                     ),
                   ),
-                  child: const Icon(Icons.live_tv_rounded, size: 56, color: Colors.white),
+                  child: Icon(Icons.live_tv_rounded, size: 56, color: Pal.current.onAccent),
                 ),
                 const SizedBox(height: 18),
                 Text(t('Welcome to RaM tv'),
@@ -154,7 +156,7 @@ class EmptyState extends StatelessWidget {
                 Text(
                   t('Add your own M3U playlist or server login to start watching. RaM tv is a player only and includes no channels or content.'),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white60),
+                  style: TextStyle(color: Pal.of(context).muted),
                 ),
                 const SizedBox(height: 22),
                 FilledButton(
@@ -231,6 +233,25 @@ class LiveScreen extends StatefulWidget {
 class _LiveScreenState extends State<LiveScreen> {
   String? _group;
   bool _favOnly = false;
+  String? _view; // 'cards' | 'list'; null = default for the device
+
+  @override
+  void initState() {
+    super.initState();
+    _view = store.prefs.getString('live.view');
+    _group = store.prefs.getString('live.group');
+    _favOnly = store.prefs.getBool('live.fav') ?? false;
+    if (_group != null && !store.liveGroups.contains(_group)) _group = null;
+  }
+
+  void _saveFilter() {
+    if (_group == null) {
+      store.prefs.remove('live.group');
+    } else {
+      store.prefs.setString('live.group', _group!);
+    }
+    store.prefs.setBool('live.fav', _favOnly);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -246,14 +267,34 @@ class _LiveScreenState extends State<LiveScreen> {
           list = store.live;
         }
         final groups = store.liveGroups;
+        final cards = (_view ?? (isWide(context) ? 'cards' : 'list')) == 'cards';
+        final gs = isWide(context) ? uiScale(context) : 1.0;
+        final extent = (isWide(context) ? 230 : 160) * gs;
         return SafeArea(
           child: Column(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text(t('Live'), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(t('Live'), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
+                          Text(t('Hold OK on a channel to add it to favorites'),
+                              style: TextStyle(fontSize: 13, color: Pal.of(context).muted)),
+                        ],
+                      ),
+                    ),
+                    _ViewToggle(
+                      cards: cards,
+                      onChange: (v) {
+                        setState(() => _view = v ? 'cards' : 'list');
+                        store.prefs.setString('live.view', _view!);
+                      },
+                    ),
+                  ],
                 ),
               ),
               SizedBox(
@@ -269,25 +310,34 @@ class _LiveScreenState extends State<LiveScreen> {
                     if (i == 0) {
                       label = t('All');
                       selected = _group == null && !_favOnly;
-                      onTap = () => setState(() {
-                            _group = null;
-                            _favOnly = false;
-                          });
+                      onTap = () {
+                        setState(() {
+                          _group = null;
+                          _favOnly = false;
+                        });
+                        _saveFilter();
+                      };
                     } else if (i == 1) {
                       label = '♥ ${t('Favorites')}';
                       selected = _favOnly;
-                      onTap = () => setState(() {
-                            _favOnly = true;
-                            _group = null;
-                          });
+                      onTap = () {
+                        setState(() {
+                          _favOnly = true;
+                          _group = null;
+                        });
+                        _saveFilter();
+                      };
                     } else {
                       final g = groups[i - 2];
                       label = g;
                       selected = _group == g && !_favOnly;
-                      onTap = () => setState(() {
-                            _group = g;
-                            _favOnly = false;
-                          });
+                      onTap = () {
+                        setState(() {
+                          _group = g;
+                          _favOnly = false;
+                        });
+                        _saveFilter();
+                      };
                     }
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -298,20 +348,82 @@ class _LiveScreenState extends State<LiveScreen> {
               ),
               Expanded(
                 child: list.isEmpty
-                    ? Center(child: Text(t('No channels'), style: const TextStyle(color: Colors.white54)))
-                    : ListView.builder(
-                        itemCount: list.length,
-                        itemExtent: isWide(context) ? 92 : 76,
-                        itemBuilder: (_, i) => ChannelRow(
-                          item: list[i],
-                          onTap: () => openItem(context, list[i], list: list),
-                        ),
-                      ),
+                    ? Center(child: Text(t('No channels'), style: TextStyle(color: Pal.of(context).muted)))
+                    : cards
+                        ? GridView.builder(
+                            padding: EdgeInsets.all(16 * gs),
+                            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: extent,
+                              mainAxisExtent: extent / 1.6 + 44 * gs,
+                              crossAxisSpacing: 14 * gs,
+                              mainAxisSpacing: 14 * gs,
+                            ),
+                            itemCount: list.length,
+                            itemBuilder: (_, i) => PosterCard(
+                              item: list[i],
+                              onTap: () => openItem(context, list[i], list: list),
+                              onLongPress: () => toggleFavoriteWithToast(context, list[i]),
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: list.length,
+                            itemExtent: isWide(context) ? 92 : 76,
+                            itemBuilder: (_, i) => ChannelRow(
+                              item: list[i],
+                              onTap: () => openItem(context, list[i], list: list),
+                            ),
+                          ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _ViewToggle extends StatelessWidget {
+  final bool cards;
+  final ValueChanged<bool> onChange;
+  const _ViewToggle({required this.cards, required this.onChange});
+
+  Widget _btn(BuildContext context, IconData icon, String label, bool selected, VoidCallback tap) {
+    final p = Pal.of(context);
+    return Pressable(
+      radius: 20,
+      onTap: tap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? p.accent : p.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? p.accent : p.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: selected ? p.onAccent : p.text),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? p.onAccent : p.text)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _btn(context, Icons.grid_view_rounded, t('Cards'), cards, () => onChange(true)),
+        const SizedBox(width: 8),
+        _btn(context, Icons.view_list_rounded, t('List'), !cards, () => onChange(false)),
+      ],
     );
   }
 }
@@ -328,6 +440,7 @@ class ChannelRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Pressable(
         onTap: onTap,
+        onLongPress: () => toggleFavoriteWithToast(context, item),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
@@ -361,7 +474,7 @@ class ChannelRow extends StatelessWidget {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
+                                color: Pal.current.text.withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(b, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
@@ -372,15 +485,23 @@ class ChannelRow extends StatelessWidget {
                     Text(item.group,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                        style: TextStyle(fontSize: 12, color: Pal.current.muted)),
                   ],
                 ),
               ),
-              IconButton(
-                onPressed: () => store.toggleFavorite(item),
+              TextButton.icon(
+                onPressed: () => toggleFavoriteWithToast(context, item),
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                 icon: Icon(
-                  store.isFavorite(item) ? Icons.favorite : Icons.favorite_border,
-                  color: store.isFavorite(item) ? kBrand : Colors.white54,
+                  store.isFavorite(item) ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  size: 22,
+                  color: store.isFavorite(item) ? kBrand : Pal.current.muted,
+                ),
+                label: Text(
+                  store.isFavorite(item) ? t('In favorites') : t('Add to favorites'),
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: store.isFavorite(item) ? kBrand : Pal.current.muted),
                 ),
               ),
             ],
@@ -465,7 +586,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                   itemCount: shown.length,
                   itemBuilder: (_, i) =>
-                      PosterCard(item: shown[i], onTap: () => openItem(context, shown[i])),
+                      PosterCard(
+                          item: shown[i],
+                          onTap: () => openItem(context, shown[i]),
+                          onLongPress: () => toggleFavoriteWithToast(context, shown[i])),
                 ),
               ),
             ],
@@ -539,7 +663,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
           const SizedBox(height: 16),
           if (_loading) const Center(child: CircularProgressIndicator()),
           if (!_loading && _eps.isEmpty)
-            Center(child: Text(t('No episodes'), style: const TextStyle(color: Colors.white54))),
+            Center(child: Text(t('No episodes'), style: TextStyle(color: Pal.of(context).muted))),
           for (final s in seasons) ...[
             Padding(
               padding: const EdgeInsets.only(top: 14, bottom: 6),
@@ -553,7 +677,7 @@ class _SeriesDetailScreenState extends State<SeriesDetailScreen> {
                   return Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(req: req)));
                 },
                 child: ListTile(
-                  leading: const Icon(Icons.play_circle_fill_rounded, color: kBrand),
+                  leading: Icon(Icons.play_circle_fill_rounded, color: kBrand),
                   title: Text('${e.number}. ${e.title}', maxLines: 2, overflow: TextOverflow.ellipsis),
                 ),
               ),
@@ -575,19 +699,33 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _c = TextEditingController();
+  Timer? _debounce;
+  String _q = '';
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _c.dispose();
     super.dispose();
   }
 
+  String _kindLabel(Item i) {
+    switch (i.kind) {
+      case Kind.live:
+        return t('Live');
+      case Kind.movie:
+        return t('Movies');
+      case Kind.series:
+        return t('Series');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final q = _c.text.trim().toLowerCase();
+    final q = normalizeSearch(_q);
     final results = q.length < 2
         ? <Item>[]
-        : store.items.where((e) => e.name.toLowerCase().contains(q)).take(150).toList();
+        : store.items.where((e) => searchKey(e).contains(q)).take(150).toList();
     return SafeArea(
       child: Column(
         children: [
@@ -595,7 +733,12 @@ class _SearchScreenState extends State<SearchScreen> {
             padding: const EdgeInsets.all(16),
             child: DpadTextField(
               controller: _c,
-              onChanged: (_) => setState(() {}),
+              onChanged: (v) {
+                _debounce?.cancel();
+                _debounce = Timer(const Duration(milliseconds: 250), () {
+                  if (mounted) setState(() => _q = v);
+                });
+              },
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search_rounded),
                 hintText: t('Search channels, movies, series'),
@@ -612,6 +755,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 final item = results[i];
                 return Pressable(
                   onTap: () => openItem(context, item),
+                  onLongPress: () => toggleFavoriteWithToast(context, item),
                   child: ListTile(
                     leading: SizedBox(
                       width: 52,
@@ -621,8 +765,8 @@ class _SearchScreenState extends State<SearchScreen> {
                         child: ArtThumb(item: item, fit: item.kind == Kind.live),
                       ),
                     ),
-                    title: Text(item.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(item.group, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    title: Text(item.displayTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text('${_kindLabel(item)}  •  ${item.group}', maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
                 );
               },
@@ -633,108 +777,6 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 }
-
-// ---------------------------------------------------------------- Settings
-
-class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController _tmdb;
-
-  @override
-  void initState() {
-    super.initState();
-    _tmdb = TextEditingController(text: store.prefs.getString('tmdbKey') ?? '');
-  }
-
-  @override
-  void dispose() {
-    _tmdb.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: store,
-      builder: (context, _) => SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(t('Settings'), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 16),
-            Text(t('Sources'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
-            for (final s in store.sources)
-              ListTile(
-                title: Text(s.name),
-                subtitle: Text(s.type == 'demo' ? t('Demo') : _maskUrl(s.url), maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  onPressed: () => store.removeSource(s.id),
-                ),
-              ),
-            ListTile(
-              leading: const Icon(Icons.add_circle_rounded, color: kBrand),
-              title: Text(t('Add Source')),
-              onTap: () => showAddSource(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.refresh_rounded),
-              title: Text(t('Refresh')),
-              trailing: store.loading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : null,
-              onTap: store.refresh,
-            ),
-            if (store.error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(store.error!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
-              ),
-            const SizedBox(height: 16),
-            Text(t('Artwork'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
-            const SizedBox(height: 8),
-            DpadTextField(
-              controller: _tmdb,
-              onChanged: (v) => store.prefs.setString('tmdbKey', v.trim()),
-              decoration: const InputDecoration(
-                labelText: 'TMDB API key (optional)',
-                helperText: 'Free key from themoviedb.org > Settings > API. Restart the app after adding it.',
-                helperMaxLines: 2,
-                border: OutlineInputBorder(),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.cleaning_services_rounded),
-              title: Text(t('Clear artwork cache')),
-              onTap: () => ArtworkService.instance.clear(),
-            ),
-            const SizedBox(height: 16),
-            Text(t('About'), style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white70)),
-            const SizedBox(height: 8),
-            Text(
-              t('RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access.'),
-              style: const TextStyle(fontSize: 12, color: Colors.white54),
-            ),
-            const SizedBox(height: 8),
-            const Text('This product uses the TMDB API but is not endorsed or certified by TMDB.',
-                style: TextStyle(fontSize: 11, color: Colors.white38)),
-            const SizedBox(height: 8),
-            const Text('RaM tv  1.0', style: TextStyle(color: Colors.white54)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-String _maskUrl(String u) => u.replaceAllMapped(
-    RegExp(r'(password|pass|pwd)=([^&]+)', caseSensitive: false), (m) => '${m.group(1)}=••••');
 
 Future<void> showAddSource(BuildContext context) {
   return showDialog<void>(context: context, builder: (_) => const _AddSourceDialog());
@@ -837,7 +879,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
                           const SizedBox(height: 6),
                           Text(
                             t('Scan the code or open the address in your phone browser (same Wi-Fi). Enter the PIN shown here.'),
-                            style: const TextStyle(fontSize: 12, color: Colors.white60),
+                            style: TextStyle(fontSize: 12, color: Pal.of(context).muted),
                           ),
                         ],
                       ),
@@ -845,7 +887,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
                   ],
                 ),
                 const Divider(height: 28),
-                Text(t('Or type it here'), style: const TextStyle(color: Colors.white60)),
+                Text(t('Or type it here'), style: TextStyle(color: Pal.of(context).muted)),
                 const SizedBox(height: 8),
               ],
               Center(
