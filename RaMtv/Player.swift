@@ -119,6 +119,7 @@ struct PlayerScreen: View {
     @State private var engine: Engine
     @State private var showChrome = true
     @State private var showList = false
+    @State private var onAir: EpgEntry?
 
     init(req: PlayRequest) {
         _req = State(initialValue: req)
@@ -216,12 +217,24 @@ struct PlayerScreen: View {
                 }
                 .accessibilityLabel(t("Apple player"))
             }
-            Text(req.title)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .shadow(radius: 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, isAV ? 120 : 0)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(req.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if let p = onAir {
+                    Text(p.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .shadow(radius: 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, isAV ? 120 : 0)
+            .task(id: req.id) {
+                onAir = nil
+                if req.isLive, let item = req.item { onAir = await store.nowNext(for: item).now }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -269,9 +282,22 @@ final class AVModel: ObservableObject {
     private var timeObs: Any?
     private var endObs: NSObjectProtocol?
     private var didResume = false
+    private var reportedFailure = false
+    private var watchdog: DispatchWorkItem?
     private var onReadyHandler: () -> Void
     private var onFailHandler: () -> Void
     private var onEndedHandler: () -> Void
+
+    /// Seconds Apple's player gets to become ready before VLC takes over. Streams that stall
+    /// without reporting an error would otherwise stay black.
+    static let startupTimeout: TimeInterval = 20
+
+    private func fail() {
+        guard !reportedFailure else { return }
+        reportedFailure = true
+        watchdog?.cancel()
+        onFailHandler()
+    }
 
     func updateHandlers(onReady: @escaping () -> Void, onFail: @escaping () -> Void, onEnded: @escaping () -> Void) {
         onReadyHandler = onReady
@@ -295,8 +321,9 @@ final class AVModel: ObservableObject {
         obs = item.observe(\.status, options: [.new]) { [weak self] it, _ in
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                if it.status == .failed { self.onFailHandler() }
+                if it.status == .failed { self.fail() }
                 if it.status == .readyToPlay {
+                    self.watchdog?.cancel()
                     if !self.didResume {
                         self.didResume = true
                         if let key = resumeKey, let r = ResumeStore.get(key), r.seconds > 20 {
@@ -321,9 +348,17 @@ final class AVModel: ObservableObject {
             self?.onEndedHandler()
         }
         player.play()
+
+        let check = DispatchWorkItem { [weak self] in
+            guard let self = self, self.player.currentItem?.status != .readyToPlay else { return }
+            self.fail()
+        }
+        watchdog = check
+        DispatchQueue.main.asyncAfter(deadline: .now() + AVModel.startupTimeout, execute: check)
     }
 
     deinit {
+        watchdog?.cancel()
         if let o = timeObs { player.removeTimeObserver(o) }
         if let e = endObs { NotificationCenter.default.removeObserver(e) }
         if !PlayerHub.shared.isHolding(player) { player.pause() }

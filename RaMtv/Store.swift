@@ -184,6 +184,15 @@ final class AppStore: ObservableObject {
         nowPlaying = r
     }
 
+    /// Programme on air now and next, for Xtream live channels.
+    func nowNext(for item: Item) async -> (now: EpgEntry?, next: EpgEntry?) {
+        let source = sources.first(where: { $0.id == item.sourceId })
+        return EpgParser.nowNext(await EpgCache.shared.entries(for: item, source: source))
+    }
+
+    /// Playable URL for an item (same rules as the main player), for multi-view windows.
+    func streamURL(for item: Item) -> URL? { makeRequest(item)?.url }
+
     func isFavorite(_ item: Item) -> Bool { favorites.contains(item.id) }
 
     func toggleFavorite(_ item: Item) {

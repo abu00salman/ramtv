@@ -31,7 +31,13 @@ private let arabic: [String: String] = [
         "أضف قائمة M3U أو بيانات سيرفر خاصة بك لتبدأ المشاهدة. RaM tv مشغّل فقط ولا يتضمن أي قنوات أو محتوى.",
     "RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access.":
         "RaM tv مشغّل فقط. لا يقدّم ولا يتضمن أي قنوات أو قوائم أو محتوى. استخدم مصادر مصرّحاً لك بها فقط.",
-    "Search channels, movies, series": "ابحث في القنوات والأفلام والمسلسلات"
+    "Search channels, movies, series": "ابحث في القنوات والأفلام والمسلسلات",
+    "Accent color": "لون التطبيق", "Blue": "أزرق", "Purple": "بنفسجي", "Teal": "فيروزي",
+    "Red": "أحمر", "Orange": "برتقالي", "Green": "أخضر",
+    "Multi-view": "مشاهدة متعددة", "Add channel": "إضافة قناة", "Add window": "إضافة نافذة",
+    "Change channel": "تغيير القناة", "Remove": "إزالة",
+    "Tap a window to hear it. Double-tap to enlarge.": "اضغط على نافذة لسماع صوتها، واضغط مرتين للتكبير.",
+    "Not playable in multi-view": "لا يمكن تشغيلها في المشاهدة المتعددة"
 ]
 
 enum AppLanguage: String, CaseIterable, Identifiable {

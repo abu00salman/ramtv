@@ -3,7 +3,8 @@ import Security
 import SwiftUI
 
 extension Color {
-    static let ram = Color(red: 0, green: 0.341, blue: 1)
+    /// The app's accent colour; follows the user's choice in Settings (blue by default).
+    static var ram: Color { AppAccent.current.color }
 }
 
 extension String {

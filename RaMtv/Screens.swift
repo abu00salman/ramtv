@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @AppStorage("appLanguage") private var language = AppLanguage.system.rawValue
+    @AppStorage(AppAccent.storageKey) private var accent = AppAccent.blue.rawValue
     @State private var selectedTab = 0
     @EnvironmentObject var store: AppStore
 
@@ -13,7 +14,7 @@ struct RootView: View {
             SearchView().tabItem { Label(t("Search"), systemImage: "magnifyingglass") }.tag(3)
             SettingsView().tabItem { Label(t("Settings"), systemImage: "gearshape.fill") }.tag(4)
         }
-        .id(language)
+        .id(language + accent)
         .environment(\.locale, (AppLanguage(rawValue: language) ?? .system).locale)
         .environment(\.layoutDirection, (AppLanguage(rawValue: language) ?? .system).isArabic ? .rightToLeft : .leftToRight)
         .overlay(alignment: .top) {
@@ -74,6 +75,7 @@ struct ChannelRow: View {
     @EnvironmentObject var store: AppStore
     let item: Item
     let onTap: () -> Void
+    @State private var onAir: EpgEntry?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -90,7 +92,15 @@ struct ChannelRow: View {
                             .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
                 }
-                Text(item.group).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let p = onAir {
+                    Text(p.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    ProgressView(value: p.progress())
+                        .tint(Color.ram)
+                        .frame(maxWidth: 140)
+                        .scaleEffect(x: 1, y: 0.6, anchor: .center)
+                } else {
+                    Text(item.group).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer()
             Button { store.toggleFavorite(item) } label: {
@@ -101,6 +111,7 @@ struct ChannelRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
+        .task(id: item.id) { onAir = await store.nowNext(for: item).now }
     }
 }
 
@@ -108,6 +119,7 @@ struct LiveView: View {
     @EnvironmentObject var store: AppStore
     @State private var group: String? = nil
     @State private var favOnly = false
+    @State private var showMulti = false
     @AppStorage("liveLayout") private var liveLayout = "list"
 
     private var filtered: [Item] {
@@ -174,6 +186,17 @@ struct LiveView: View {
                     .pickerStyle(.menu)
                     .accessibilityIdentifier("live.layout")
                 }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showMulti = true } label: {
+                        Image(systemName: "rectangle.split.2x2")
+                    }
+                    .accessibilityLabel(t("Multi-view"))
+                    .accessibilityIdentifier("live.multiview")
+                    .disabled(store.live.isEmpty)
+                }
+            }
+            .fullScreenCover(isPresented: $showMulti) {
+                MultiViewScreen().environmentObject(store)
             }
         }
     }
@@ -329,6 +352,7 @@ struct SettingsView: View {
     @AppStorage("appLanguage") private var language = AppLanguage.system.rawValue
     @AppStorage("liveLayout") private var liveLayout = "list"
     @AppStorage("appAppearance") private var appearance = AppAppearance.dark.rawValue
+    @AppStorage(AppAccent.storageKey) private var accent = AppAccent.blue.rawValue
 
     var body: some View {
         NavigationStack {
@@ -349,6 +373,17 @@ struct SettingsView: View {
                         Text(t("List")).tag("list")
                         Text(t("Grid")).tag("grid")
                     }
+                    Picker(t("Accent color"), selection: $accent) {
+                        ForEach(AppAccent.allCases) { a in
+                            Label {
+                                Text(a.title)
+                            } icon: {
+                                Image(systemName: "circle.fill").foregroundStyle(a.color)
+                            }
+                            .tag(a.rawValue)
+                        }
+                    }
+                    .accessibilityIdentifier("settings.accent")
                 }
                 Section(t("Sources")) {
                     ForEach(store.sources) { s in
@@ -390,7 +425,7 @@ struct SettingsView: View {
                     HStack {
                         Text("RaM tv")
                         Spacer()
-                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2")
+                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0")
                             .foregroundStyle(.secondary)
                     }
                 }
