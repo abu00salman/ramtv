@@ -116,7 +116,7 @@ jobs:
 
   release:
     needs: [quality, ios, android, windows, macos]
-    if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/development/tv-')) }}
+    if: ${{ success() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/development/tv-') || startsWith(github.ref, 'refs/heads/development/ios-')) }}
     permissions:
       contents: write
     runs-on: ubuntu-latest

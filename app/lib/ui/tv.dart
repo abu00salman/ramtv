@@ -6,16 +6,15 @@ import '../models.dart';
 import '../store.dart';
 import '../strings.dart';
 import '../text_utils.dart';
+import '../theme.dart';
 import 'screens.dart';
+import 'settings.dart';
 import 'widgets.dart';
 
-const Color kTvBg = Color(0xFF070B14);
-const Color kTvPanel = Color(0xFF0A1020);
 const Color kTvLive = Color(0xFFE5233C);
 
 /// 1.0 at 540dp screen height. Keeps the layout proportional on any TV density.
-double tvScale(BuildContext c) =>
-    (MediaQuery.of(c).size.height / 540).clamp(0.85, 2.2).toDouble();
+double tvScale(BuildContext c) => uiScale(c);
 
 bool _keyboardNavigation() =>
     FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
@@ -30,11 +29,13 @@ String _fmtDuration(double seconds) {
 
 // ---------------------------------------------------------------- Focus primitive
 
-/// Focusable element with a clear white frame (plus a small blue glow) for remote navigation.
+/// Focusable element with a clear frame for remote navigation (no heavy glow).
 /// After the tap callback finishes (e.g. a player route is closed) focus returns to this element.
+/// With [onLongPress] the OK key distinguishes tap (on release) from hold.
 class TvFocusable extends StatefulWidget {
   final Widget Function(BuildContext context, bool focused) builder;
   final TapCb? onTap;
+  final VoidCallback? onLongPress;
   final double radius;
   final bool autofocus;
   final FocusNode? focusNode;
@@ -43,6 +44,7 @@ class TvFocusable extends StatefulWidget {
     super.key,
     required this.builder,
     this.onTap,
+    this.onLongPress,
     this.radius = 14,
     this.autofocus = false,
     this.focusNode,
@@ -56,6 +58,10 @@ class _TvFocusableState extends State<TvFocusable> {
   late final FocusNode _node;
   late final bool _ownsNode;
   bool _focused = false;
+  late final SelectKeyHandler _keys = SelectKeyHandler(
+    onTap: () => unawaited(_activate()),
+    onLongPress: widget.onLongPress == null ? null : () => widget.onLongPress!(),
+  );
 
   @override
   void initState() {
@@ -78,49 +84,52 @@ class _TvFocusableState extends State<TvFocusable> {
 
   @override
   Widget build(BuildContext context) {
+    final p = Pal.of(context);
     final r = BorderRadius.circular(widget.radius);
-    return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+    final ink = InkWell(
+      focusNode: _node,
+      autofocus: widget.autofocus,
+      borderRadius: r,
+      focusColor: Colors.transparent,
+      hoverColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      splashColor: Colors.transparent,
+      onTap: widget.onTap == null ? null : () => unawaited(_activate()),
+      onLongPress: widget.onLongPress,
+      onFocusChange: (f) {
+        setState(() => _focused = f);
+        if (f) {
+          Scrollable.ensureVisible(context,
+              duration: const Duration(milliseconds: 120), alignment: 0.5);
+        }
       },
-      child: InkWell(
-        focusNode: _node,
-        autofocus: widget.autofocus,
-        borderRadius: r,
-        focusColor: Colors.transparent,
-        hoverColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-        splashColor: Colors.transparent,
-        onTap: widget.onTap == null ? null : _activate,
-        onFocusChange: (f) {
-          setState(() => _focused = f);
-          if (f) {
-            Scrollable.ensureVisible(context,
-                duration: const Duration(milliseconds: 150), alignment: 0.5);
-          }
-        },
-        child: AnimatedScale(
-          scale: _focused ? 1.05 : 1.0,
-          duration: const Duration(milliseconds: 120),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: r,
-              boxShadow: _focused
-                  ? [BoxShadow(color: kBrand.withValues(alpha: 0.55), blurRadius: 14)]
-                  : null,
-            ),
-            child: DecoratedBox(
-              position: DecorationPosition.foreground,
-              decoration: BoxDecoration(
-                borderRadius: r,
-                border: Border.all(
-                    color: _focused ? Colors.white : Colors.transparent, width: 3),
-              ),
-              child: widget.builder(context, _focused),
-            ),
+      child: AnimatedScale(
+        scale: _focused ? 1.04 : 1.0,
+        duration: const Duration(milliseconds: 110),
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            borderRadius: r,
+            border: Border.all(
+                color: _focused ? p.focus : Colors.transparent, width: 3),
           ),
+          child: widget.builder(context, _focused),
         ),
       ),
+    );
+    if (widget.onLongPress == null) {
+      return Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        },
+        child: ink,
+      );
+    }
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, e) => _keys.handle(e),
+      child: ink,
     );
   }
 }
@@ -144,6 +153,7 @@ class TvButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = tvScale(context);
+    final p = Pal.of(context);
     return TvFocusable(
       autofocus: autofocus,
       radius: 12 * s,
@@ -151,22 +161,207 @@ class TvButton extends StatelessWidget {
       builder: (ctx, focused) => Container(
         padding: EdgeInsets.symmetric(horizontal: 26 * s, vertical: 12 * s),
         decoration: BoxDecoration(
-          color: filled ? kBrand : Colors.black.withValues(alpha: 0.35),
+          color: filled ? p.accent : p.surface,
           borderRadius: BorderRadius.circular(12 * s),
-          border: filled ? null : Border.all(color: Colors.white38, width: 1.5),
+          border: filled ? null : Border.all(color: p.border, width: 1.5),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: 26 * s, color: Colors.white),
+              Icon(icon, size: 26 * s, color: filled ? p.onAccent : p.text),
               SizedBox(width: 10 * s),
             ],
             Text(label,
                 style: TextStyle(
-                    fontSize: 21 * s, fontWeight: FontWeight.w700, color: Colors.white)),
+                    fontSize: 21 * s,
+                    fontWeight: FontWeight.w700,
+                    color: filled ? p.onAccent : p.text)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- Connection status panel
+
+String _connectionLabel() {
+  if (store.loading) return t('Updating');
+  if (store.internetOk == false) return t('Offline');
+  if (store.error != null) return t('Source unreachable');
+  return t('Connected');
+}
+
+Color _connectionColor() {
+  if (store.loading) return Colors.amber;
+  if (store.internetOk == false || store.error != null) return Colors.redAccent;
+  return const Color(0xFF22C55E);
+}
+
+String _when(DateTime? d) {
+  if (d == null) return t('Never');
+  final l = d.toLocal();
+  return '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
+}
+
+Future<void> showStatusPanel(BuildContext context) {
+  if (store.internetOk == null && !store.checking) unawaited(store.checkConnection());
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => const _StatusDialog(),
+  );
+}
+
+class _StatusDialog extends StatelessWidget {
+  const _StatusDialog();
+
+  Widget _line(Palette p, double s, String label, bool? ok, String detail) {
+    final color = ok == null
+        ? p.muted
+        : (ok ? const Color(0xFF22C55E) : Colors.redAccent);
+    final text = ok == null ? t('Unknown') : (ok ? t('Working') : t('Not working'));
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 6 * s),
+      child: Row(
+        children: [
+          Container(
+              width: 14 * s,
+              height: 14 * s,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          SizedBox(width: 12 * s),
+          Expanded(
+            child: Text(label,
+                style: TextStyle(fontSize: 20 * s, fontWeight: FontWeight.w600, color: p.text)),
+          ),
+          Text(detail.isEmpty ? text : '$text  •  $detail',
+              style: TextStyle(fontSize: 17 * s, color: p.muted)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = tvScale(context);
+    final p = Pal.of(context);
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: uiTextScaler()),
+      child: Dialog(
+        backgroundColor: p.panelSolid,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * s)),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 640 * s),
+          child: ListenableBuilder(
+            listenable: store,
+            builder: (context, _) {
+              final src = store.activeSource;
+              final reach = src == null ? null : store.sourceReachable[src.id];
+              final refreshed = src == null ? null : store.sourceRefreshOk[src.id];
+              final sourceOk = reach ?? refreshed;
+              return Padding(
+                padding: EdgeInsets.all(24 * s),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const _Avatar(size: 48, dot: Colors.transparent, scaled: true),
+                          SizedBox(width: 14 * s),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(t('Connection status'),
+                                    style: TextStyle(
+                                        fontSize: 26 * s,
+                                        fontWeight: FontWeight.w800,
+                                        color: p.text)),
+                                Text(src?.name ?? '-',
+                                    style: TextStyle(fontSize: 17 * s, color: p.muted)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 14 * s),
+                      _line(p, s, t('Internet'), store.internetOk,
+                          store.checking ? t('Checking') : ''),
+                      _line(p, s, t('Source'), sourceOk, ''),
+                      _line(p, s, t('Stream'), store.streamOk, ''),
+                      SizedBox(height: 6 * s),
+                      Text('${t('Last update')}: ${_when(store.lastRefreshAt)}     ${t('Last check')}: ${_when(store.lastCheckAt)}',
+                          style: TextStyle(fontSize: 15 * s, color: p.muted)),
+                      if (store.sources.length > 1) ...[
+                        SizedBox(height: 16 * s),
+                        Text(t('Switch source'),
+                            style: TextStyle(
+                                fontSize: 19 * s, fontWeight: FontWeight.w700, color: p.text)),
+                        SizedBox(height: 8 * s),
+                        Wrap(
+                          spacing: 10 * s,
+                          runSpacing: 10 * s,
+                          children: [
+                            _srcChip(p, s, t('All sources'), store.activeSourceId == null,
+                                () => store.setActiveSource(null)),
+                            for (final x in store.sources)
+                              _srcChip(p, s, x.name, store.activeSourceId == x.id,
+                                  () => store.setActiveSource(x.id)),
+                          ],
+                        ),
+                      ],
+                      SizedBox(height: 20 * s),
+                      Wrap(
+                        spacing: 12 * s,
+                        runSpacing: 12 * s,
+                        children: [
+                          TvButton(
+                            label: t('Check connection'),
+                            icon: Icons.network_check_rounded,
+                            filled: true,
+                            autofocus: true,
+                            onTap: store.checkConnection,
+                          ),
+                          TvButton(
+                            label: store.error != null ? t('Retry update') : t('Refresh'),
+                            icon: Icons.refresh_rounded,
+                            onTap: store.refresh,
+                          ),
+                          TvButton(
+                            label: t('Close'),
+                            onTap: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _srcChip(Palette p, double s, String label, bool selected, VoidCallback onTap) {
+    return TvFocusable(
+      radius: 20 * s,
+      onTap: onTap,
+      builder: (c, f) => Container(
+        padding: EdgeInsets.symmetric(horizontal: 18 * s, vertical: 8 * s),
+        decoration: BoxDecoration(
+          color: selected ? p.accent : p.surface,
+          borderRadius: BorderRadius.circular(20 * s),
+          border: Border.all(color: selected ? p.accent : p.border),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 17 * s,
+                fontWeight: FontWeight.w600,
+                color: selected ? p.onAccent : p.text)),
       ),
     );
   }
@@ -226,43 +421,383 @@ class _TvShellState extends State<TvShell> {
 
   @override
   Widget build(BuildContext context) {
-    // The sidebar is the first child: it sits on the right in Arabic (RTL) and on the left in English.
+    final p = Pal.of(context);
+    final s = tvScale(context);
+    final style = themeController.navStyle;
+    void select(int i) => setState(() => _index = i);
+    Widget navFocus(Widget child) => Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onFocusChange: (f) => _sideFocused = f,
+          child: child,
+        );
+    // Page area. With the floating dock the page keeps free space at the bottom for it.
+    final page = Stack(
+      children: [
+        Padding(
+          padding: EdgeInsets.only(bottom: style == 'dock' ? 84 * s : 0),
+          child: _page(),
+        ),
+        ListenableBuilder(
+          listenable: store,
+          builder: (context, _) => store.loading
+              ? const Align(
+                  alignment: Alignment.topCenter,
+                  child: LinearProgressIndicator(minHeight: 3))
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+    final Widget body;
+    if (style == 'top') {
+      body = Column(
+        children: [
+          navFocus(_TvTopNav(index: _index, nodes: _navNodes, onSelect: select, s: s)),
+          Expanded(child: page),
+        ],
+      );
+    } else if (style == 'dock') {
+      body = Stack(
+        children: [
+          Column(
+            children: [
+              _TvTopBar(s: s, brand: true, avatar: true),
+              Expanded(child: page),
+            ],
+          ),
+          PositionedDirectional(
+            bottom: 14 * s,
+            start: 0,
+            end: 0,
+            child: Center(
+              child: navFocus(_TvDock(index: _index, nodes: _navNodes, onSelect: select, s: s)),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // The sidebar is the first child: it sits on the right in Arabic (RTL) and on the left in English.
+      body = Row(
+        children: [
+          navFocus(_TvSidebar(index: _index, nodes: _navNodes, onSelect: select)),
+          Expanded(
+            child: Column(
+              children: [
+                _TvTopBar(s: s, brand: false, avatar: false),
+                Expanded(child: page),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) _onBack();
       },
-      child: Scaffold(
-        backgroundColor: kTvBg,
-        body: Row(
+      child: Scaffold(backgroundColor: p.bg, body: body),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- Navigation chrome
+
+const List<IconData> _navIcons = [
+  Icons.home_rounded,
+  Icons.desktop_windows_rounded,
+  Icons.movie_filter_rounded,
+  Icons.theaters_rounded,
+  Icons.favorite_border_rounded,
+  Icons.settings_outlined,
+];
+
+List<String> _navLabels() => [
+      t('Home'),
+      t('Channels'),
+      t('Movies'),
+      t('Series'),
+      t('Favorites'),
+      t('Settings'),
+    ];
+
+String _clockText() {
+  final n = DateTime.now();
+  return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
+}
+
+class _TvClock extends StatefulWidget {
+  final double s;
+  const _TvClock({required this.s});
+
+  @override
+  State<_TvClock> createState() => _TvClockState();
+}
+
+class _TvClockState extends State<_TvClock> {
+  Timer? _timer;
+  String _text = _clockText();
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 20), (_) {
+      final v = _clockText();
+      if (mounted && v != _text) setState(() => _text = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(_text,
+        style: TextStyle(
+            fontSize: 20 * widget.s, fontWeight: FontWeight.w600, color: Pal.of(context).text));
+  }
+}
+
+class _TvBrand extends StatelessWidget {
+  final double s;
+  const _TvBrand({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10 * s),
+          child: Image.asset('assets/icon.png', width: 36 * s, height: 36 * s, cacheWidth: 128),
+        ),
+        SizedBox(width: 10 * s),
+        Text('RaM tv',
+            style: TextStyle(fontSize: 24 * s, fontWeight: FontWeight.w800, color: p.text)),
+      ],
+    );
+  }
+}
+
+/// Search is available from every page (it used to exist only on Home).
+class _TvSearchPill extends StatelessWidget {
+  final double s;
+  final bool compact;
+  const _TvSearchPill({required this.s, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return TvFocusable(
+      radius: 26 * s,
+      onTap: () => Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const SearchPage())),
+      builder: (c, f) => Container(
+        padding: EdgeInsets.symmetric(horizontal: (compact ? 14 : 22) * s, vertical: 10 * s),
+        decoration: BoxDecoration(
+          color: f ? p.text.withValues(alpha: 0.1) : p.surface,
+          borderRadius: BorderRadius.circular(26 * s),
+          border: Border.all(color: p.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Focus(
-              canRequestFocus: false,
-              skipTraversal: true,
-              onFocusChange: (f) => _sideFocused = f,
-              child: _TvSidebar(
-                index: _index,
-                nodes: _navNodes,
-                onSelect: (i) => setState(() => _index = i),
-              ),
-            ),
-            Expanded(
-              child: Stack(
-                children: [
-                  _page(),
-                  ListenableBuilder(
-                    listenable: store,
-                    builder: (context, _) => store.loading
-                        ? const Align(
-                            alignment: Alignment.topCenter,
-                            child: LinearProgressIndicator(minHeight: 3))
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-            ),
+            Icon(Icons.search_rounded, size: 24 * s, color: p.text),
+            if (!compact) ...[
+              SizedBox(width: 10 * s),
+              Text(t('Search'), style: TextStyle(fontSize: 18 * s, color: p.muted)),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TvStatusButton extends StatelessWidget {
+  final double s;
+  const _TvStatusButton({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return ListenableBuilder(
+      listenable: store,
+      builder: (c, _) => TvFocusable(
+        radius: 26 * s,
+        onTap: () => showStatusPanel(context),
+        builder: (c2, f) => Container(
+          padding: EdgeInsets.all(3 * s),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: f ? p.text : Colors.transparent, width: 2),
+          ),
+          child: _Avatar(size: 38 * s, dot: _connectionColor()),
+        ),
+      ),
+    );
+  }
+}
+
+/// Slim bar above every page: search, clock and (optionally) brand and connection status.
+class _TvTopBar extends StatelessWidget {
+  final double s;
+  final bool brand;
+  final bool avatar;
+  const _TvTopBar({required this.s, required this.brand, required this.avatar});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(36 * s, 12 * s, 36 * s, 4 * s),
+      child: Row(
+        children: [
+          if (brand) ...[_TvBrand(s: s), SizedBox(width: 22 * s)],
+          _TvSearchPill(s: s),
+          const Spacer(),
+          _TvClock(s: s),
+          if (avatar) ...[SizedBox(width: 14 * s), _TvStatusButton(s: s)],
+        ],
+      ),
+    );
+  }
+}
+
+/// One navigation entry for the top bar and the dock: the open section shows icon + label,
+/// the others show an icon (and the label while focused or hovered).
+Widget _navPill(BuildContext context,
+    {required int i,
+    required int index,
+    required List<FocusNode> nodes,
+    required ValueChanged<int> onSelect,
+    required double s}) {
+  final p = Pal.of(context);
+  final label = _navLabels()[i];
+  return Tooltip(
+    message: label,
+    child: TvFocusable(
+      focusNode: nodes[i],
+      radius: 24 * s,
+      onTap: () => onSelect(i),
+      builder: (c, focused) {
+        final selected = i == index;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          height: 46 * s,
+          padding: EdgeInsets.symmetric(horizontal: 14 * s),
+          decoration: BoxDecoration(
+            color: selected
+                ? p.accent
+                : (focused ? p.text.withValues(alpha: 0.1) : Colors.transparent),
+            borderRadius: BorderRadius.circular(24 * s),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_navIcons[i], size: 24 * s, color: selected ? p.onAccent : p.text),
+              if (selected || focused) ...[
+                SizedBox(width: 8 * s),
+                Text(label,
+                    maxLines: 1,
+                    style: TextStyle(
+                        fontSize: 18 * s,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? p.onAccent : p.text)),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+/// Navigation style "top": brand, a centered pill with the sections, search, clock and status.
+class _TvTopNav extends StatelessWidget {
+  final int index;
+  final List<FocusNode> nodes;
+  final ValueChanged<int> onSelect;
+  final double s;
+  const _TvTopNav(
+      {required this.index, required this.nodes, required this.onSelect, required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(28 * s, 12 * s, 28 * s, 6 * s),
+      child: Row(
+        children: [
+          _TvBrand(s: s),
+          SizedBox(width: 20 * s),
+          Expanded(
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Container(
+                  padding: EdgeInsets.all(5 * s),
+                  decoration: BoxDecoration(
+                    color: p.panel,
+                    borderRadius: BorderRadius.circular(30 * s),
+                    border: Border.all(color: p.border),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var i = 0; i < _navIcons.length; i++)
+                        _navPill(context,
+                            i: i, index: index, nodes: nodes, onSelect: onSelect, s: s),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 16 * s),
+          _TvSearchPill(s: s, compact: true),
+          SizedBox(width: 14 * s),
+          _TvClock(s: s),
+          SizedBox(width: 14 * s),
+          _TvStatusButton(s: s),
+        ],
+      ),
+    );
+  }
+}
+
+/// Navigation style "dock": a floating rounded bar at the bottom of the screen.
+class _TvDock extends StatelessWidget {
+  final int index;
+  final List<FocusNode> nodes;
+  final ValueChanged<int> onSelect;
+  final double s;
+  const _TvDock(
+      {required this.index, required this.nodes, required this.onSelect, required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return Container(
+      padding: EdgeInsets.all(7 * s),
+      decoration: BoxDecoration(
+        color: p.panelSolid.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(34 * s),
+        border: Border.all(color: p.border),
+        boxShadow: [
+          BoxShadow(
+              color: const Color(0x66000000), blurRadius: 24 * s, offset: Offset(0, 8 * s)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < _navIcons.length; i++)
+            _navPill(context, i: i, index: index, nodes: nodes, onSelect: onSelect, s: s),
+        ],
       ),
     );
   }
@@ -286,7 +821,8 @@ class _TvSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = tvScale(context);
-    final width = MediaQuery.of(context).size.width * 0.19;
+    final p = Pal.of(context);
+    final width = MediaQuery.of(context).size.width * 0.215;
     final labels = [
       t('Home'),
       t('Channels'),
@@ -297,13 +833,13 @@ class _TvSidebar extends StatelessWidget {
     ];
     return Container(
       width: width,
-      decoration: const BoxDecoration(
-        color: kTvPanel,
-        border: BorderDirectional(end: BorderSide(color: Color(0xFF16203A))),
+      decoration: BoxDecoration(
+        color: p.panel,
+        border: BorderDirectional(end: BorderSide(color: p.border)),
       ),
       padding: EdgeInsets.symmetric(horizontal: 14 * s, vertical: 18 * s),
       child: MediaQuery(
-        data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+        data: MediaQuery.of(context).copyWith(textScaler: uiTextScaler()),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -320,7 +856,7 @@ class _TvSidebar extends StatelessWidget {
                   SizedBox(width: 10 * s),
                   Text('RaM tv',
                       style: TextStyle(
-                          fontSize: 26 * s, fontWeight: FontWeight.w800, color: Colors.white)),
+                          fontSize: 26 * s, fontWeight: FontWeight.w800, color: p.text)),
                 ],
               ),
             ),
@@ -332,31 +868,33 @@ class _TvSidebar extends StatelessWidget {
                   radius: 14 * s,
                   onTap: () => onSelect(i),
                   builder: (ctx, focused) {
+                    // "open" section = filled accent; "focused" item = frame + light tint.
                     final selected = i == index;
                     return Container(
                       height: 50 * s,
                       padding: EdgeInsets.symmetric(horizontal: 16 * s),
                       decoration: BoxDecoration(
                         color: selected
-                            ? kBrand
-                            : (focused
-                                ? Colors.white.withValues(alpha: 0.10)
-                                : Colors.transparent),
+                            ? p.accent
+                            : (focused ? p.text.withValues(alpha: 0.08) : Colors.transparent),
                         borderRadius: BorderRadius.circular(14 * s),
                       ),
                       child: Row(
                         children: [
                           Icon(_icons[i],
-                              size: 26 * s, color: selected ? Colors.white : Colors.white70),
+                              size: 26 * s, color: selected ? p.onAccent : p.muted),
                           SizedBox(width: 14 * s),
                           Expanded(
-                            child: Text(labels[i],
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 20 * s,
-                                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                                    color: selected ? Colors.white : Colors.white70)),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: AlignmentDirectional.centerStart,
+                              child: Text(labels[i],
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                      fontSize: 20 * s,
+                                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                                      color: selected ? p.onAccent : p.text)),
+                            ),
                           ),
                         ],
                       ),
@@ -365,23 +903,31 @@ class _TvSidebar extends StatelessWidget {
                 ),
               ),
             const Spacer(),
-            Divider(color: const Color(0xFF16203A), height: 24 * s),
+            Divider(color: p.border, height: 24 * s),
             ListenableBuilder(
               listenable: store,
               builder: (context, _) {
-                final ok = store.sources.isNotEmpty && store.error == null;
-                final label =
-                    store.loading ? t('Updating') : (ok ? t('Connected') : t('Offline'));
-                final color = store.loading
-                    ? Colors.amber
-                    : (ok ? const Color(0xFF22C55E) : Colors.redAccent);
-                return Column(
-                  children: [
-                    _Avatar(size: 52 * s, dot: color),
-                    SizedBox(height: 8 * s),
-                    Text(label,
-                        style: TextStyle(fontSize: 16 * s, color: Colors.white70)),
-                  ],
+                return TvFocusable(
+                  radius: 16 * s,
+                  onTap: () => showStatusPanel(context),
+                  builder: (c, f) => Container(
+                    padding: EdgeInsets.symmetric(vertical: 8 * s),
+                    decoration: BoxDecoration(
+                      color: f ? p.text.withValues(alpha: 0.08) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(16 * s),
+                    ),
+                    child: Column(
+                      children: [
+                        _Avatar(size: 52 * s, dot: _connectionColor()),
+                        SizedBox(height: 8 * s),
+                        Text(_connectionLabel(),
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 16 * s, color: p.muted)),
+                      ],
+                    ),
+                  ),
                 );
               },
             ),
@@ -395,43 +941,47 @@ class _TvSidebar extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   final double size;
   final Color dot;
-  const _Avatar({required this.size, required this.dot});
+  final bool scaled;
+  const _Avatar({required this.size, required this.dot, this.scaled = false});
 
   @override
   Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    final px = scaled ? size * tvScale(context) : size;
     final name = store.sources.isNotEmpty ? store.sources.first.name.trim() : '';
     final initial = name.isEmpty ? 'R' : name.substring(0, 1).toUpperCase();
     return SizedBox(
-      width: size,
-      height: size,
+      width: px,
+      height: px,
       child: Stack(
         children: [
           Container(
-            width: size,
-            height: size,
+            width: px,
+            height: px,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: const Color(0xFF16203A),
-              border: Border.all(color: Colors.white24),
+              color: p.surface,
+              border: Border.all(color: p.border),
             ),
             child: Text(initial,
                 style: TextStyle(
-                    fontSize: size * 0.42, fontWeight: FontWeight.w700, color: Colors.white)),
+                    fontSize: px * 0.42, fontWeight: FontWeight.w700, color: p.text)),
           ),
-          PositionedDirectional(
-            end: 0,
-            bottom: 0,
-            child: Container(
-              width: size * 0.26,
-              height: size * 0.26,
-              decoration: BoxDecoration(
-                color: dot,
-                shape: BoxShape.circle,
-                border: Border.all(color: kTvPanel, width: 2),
+          if (dot != Colors.transparent)
+            PositionedDirectional(
+              end: 0,
+              bottom: 0,
+              child: Container(
+                width: px * 0.26,
+                height: px * 0.26,
+                decoration: BoxDecoration(
+                  color: dot,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: p.panel, width: 2),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -502,8 +1052,9 @@ class _TvHomeState extends State<TvHome> {
   @override
   Widget build(BuildContext context) {
     final s = tvScale(context);
+    Pal.of(context);
     return MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      data: MediaQuery.of(context).copyWith(textScaler: uiTextScaler()),
       child: ListenableBuilder(
         listenable: store,
         builder: (context, _) {
@@ -558,10 +1109,11 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Pal.of(context);
     return Padding(
       padding: EdgeInsetsDirectional.only(start: 40 * s, top: 14 * s),
       child: Text(text,
-          style: TextStyle(fontSize: 26 * s, fontWeight: FontWeight.w700, color: Colors.white)),
+          style: TextStyle(fontSize: 26 * s, fontWeight: FontWeight.w700, color: p.text)),
     );
   }
 }
@@ -604,8 +1156,7 @@ class _HeroSectionState extends State<_HeroSection> {
   String _subtitle(Item it) {
     final o = (_meta?.overview ?? '').trim();
     if (o.isNotEmpty) {
-      final cut = o.length > 150 ? '${o.substring(0, 150).trimRight()}…' : o;
-      return cut;
+      return o.length > 150 ? '${o.substring(0, 150).trimRight()}…' : o;
     }
     return it.group == 'Other' || it.group == 'Demo' ? '' : it.group;
   }
@@ -624,6 +1175,7 @@ class _HeroSectionState extends State<_HeroSection> {
   @override
   Widget build(BuildContext context) {
     final s = widget.s;
+    final p = Pal.of(context);
     final it = widget.item;
     final h = MediaQuery.of(context).size.height * 0.52;
     return SizedBox(
@@ -631,7 +1183,7 @@ class _HeroSectionState extends State<_HeroSection> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Container(color: const Color(0xFF0B1224)),
+          Container(color: p.surface),
           if (it != null && _meta?.backdropPath != null)
             Image.network(
               'https://image.tmdb.org/t/p/w1280${_meta!.backdropPath}',
@@ -653,75 +1205,37 @@ class _HeroSectionState extends State<_HeroSection> {
                 ),
               ),
             ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: AlignmentDirectional.centerStart,
                 end: AlignmentDirectional.centerEnd,
-                colors: [Color(0xE60A1020), Color(0x000A1020)],
-                stops: [0.0, 0.75],
+                colors: [p.base.withValues(alpha: 0.92), p.base.withValues(alpha: 0)],
+                stops: const [0.0, 0.75],
               ),
             ),
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.center,
                 end: Alignment.bottomCenter,
-                colors: [Color(0x00070B14), Color(0xFF070B14)],
+                colors: [p.base.withValues(alpha: 0), p.base],
               ),
-            ),
-          ),
-          // top bar: search pill (start) and clock + avatar (end)
-          PositionedDirectional(
-            top: 18 * s,
-            start: 40 * s,
-            end: 40 * s,
-            child: Row(
-              children: [
-                TvFocusable(
-                  radius: 26 * s,
-                  onTap: () => Navigator.of(context)
-                      .push(MaterialPageRoute(builder: (_) => const SearchPage())),
-                  builder: (c, f) => Container(
-                    padding: EdgeInsets.symmetric(
-                        horizontal: 22 * s, vertical: 10 * s),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(26 * s),
-                      border: Border.all(color: Colors.white24),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.search_rounded, size: 24 * s, color: Colors.white),
-                        SizedBox(width: 10 * s),
-                        Text(t('Search'),
-                            style: TextStyle(fontSize: 18 * s, color: Colors.white70)),
-                      ],
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(widget.time,
-                    style: TextStyle(
-                        fontSize: 20 * s, fontWeight: FontWeight.w600, color: Colors.white)),
-                SizedBox(width: 14 * s),
-                ListenableBuilder(
-                  listenable: store,
-                  builder: (c, _) => _Avatar(
-                      size: 40 * s,
-                      dot: store.error == null ? const Color(0xFF22C55E) : Colors.redAccent),
-                ),
-              ],
             ),
           ),
           if (it != null)
             PositionedDirectional(
               start: 40 * s,
+              top: 12 * s,
               bottom: 22 * s,
               width: MediaQuery.of(context).size.width * 0.42,
-              child: Column(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.bottomStart,
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.42,
+                  child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -732,17 +1246,17 @@ class _HeroSectionState extends State<_HeroSection> {
                           fontSize: 46 * s,
                           height: 1.15,
                           fontWeight: FontWeight.w800,
-                          color: Colors.white)),
+                          color: p.text)),
                   if (_subtitle(it).isNotEmpty) ...[
                     SizedBox(height: 8 * s),
                     Text(_subtitle(it),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 20 * s, color: Colors.white70)),
+                        style: TextStyle(fontSize: 20 * s, color: p.muted)),
                   ],
                   SizedBox(height: 8 * s),
                   Text(_metaLine(it),
-                      style: TextStyle(fontSize: 17 * s, color: Colors.white60)),
+                      style: TextStyle(fontSize: 17 * s, color: p.muted)),
                   SizedBox(height: 14 * s),
                   Row(
                     children: [
@@ -762,6 +1276,8 @@ class _HeroSectionState extends State<_HeroSection> {
                     ],
                   ),
                 ],
+              ),
+                ),
               ),
             ),
         ],
@@ -829,11 +1345,13 @@ class _ContinueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Pal.of(context);
     final r = store.getResume(item.id);
     final frac = store.resumeFraction(item.id);
     return TvFocusable(
       radius: 16 * s,
       onTap: () => openItem(context, item),
+      onLongPress: () => toggleFavoriteWithToast(context, item),
       builder: (c, f) => SizedBox(
         width: 300 * s,
         height: 168 * s,
@@ -878,7 +1396,7 @@ class _ContinueCard extends StatelessWidget {
                     value: frac,
                     minHeight: 4 * s,
                     backgroundColor: Colors.white24,
-                    color: kBrand,
+                    color: p.accent,
                   ),
                 ),
             ],
@@ -897,10 +1415,12 @@ class _ChannelCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = Pal.of(context);
     final live = item.kind == Kind.live;
     return TvFocusable(
       radius: 16 * s,
       onTap: () => openItem(context, item, list: live ? list : null),
+      onLongPress: () => toggleFavoriteWithToast(context, item),
       builder: (c, f) => SizedBox(
         width: 190 * s,
         height: 108 * s,
@@ -909,12 +1429,12 @@ class _ChannelCard extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              const DecoratedBox(
+              DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF16203A), Color(0xFF0A1020)],
+                    colors: [p.surface, p.panel],
                   ),
                 ),
               ),
@@ -961,11 +1481,16 @@ class _ChannelCard extends StatelessWidget {
                   ),
                 ),
               PositionedDirectional(
+                top: 6 * s,
+                start: 6 * s,
+                child: FavHeart(item: item, size: 28 * s),
+              ),
+              PositionedDirectional(
                 start: 10 * s,
                 end: 10 * s,
                 bottom: 8 * s,
                 child: Text(item.displayTitle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 17 * s, fontWeight: FontWeight.w700, color: Colors.white)),
@@ -986,8 +1511,9 @@ class FavoritesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = tvScale(context);
+    final p = Pal.of(context);
     return MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      data: MediaQuery.of(context).copyWith(textScaler: uiTextScaler()),
       child: ListenableBuilder(
         listenable: store,
         builder: (context, _) {
@@ -1001,16 +1527,16 @@ class FavoritesScreen extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.favorite_border_rounded, size: 64 * s, color: Colors.white38),
+                    Icon(Icons.favorite_border_rounded, size: 64 * s, color: p.muted),
                     SizedBox(height: 14 * s),
                     Text(t('No favorites yet'),
                         style: TextStyle(
-                            fontSize: 30 * s, fontWeight: FontWeight.w700, color: Colors.white)),
+                            fontSize: 30 * s, fontWeight: FontWeight.w700, color: p.text)),
                     SizedBox(height: 8 * s),
                     Text(
                         t('Add favorites with the heart button on any channel, movie or series.'),
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 18 * s, color: Colors.white60)),
+                        style: TextStyle(fontSize: 18 * s, color: p.muted)),
                   ],
                 ),
               ),
@@ -1019,6 +1545,11 @@ class FavoritesScreen extends StatelessWidget {
           return ListView(
             padding: EdgeInsets.only(bottom: 24 * s, top: 10 * s),
             children: [
+              Padding(
+                padding: EdgeInsetsDirectional.only(start: 40 * s, top: 6 * s),
+                child: Text(t('Hold OK on a channel to add it to favorites'),
+                    style: TextStyle(fontSize: 15 * s, color: p.muted)),
+              ),
               if (channels.isNotEmpty) ...[
                 _SectionTitle(t('Channels'), s),
                 Padding(
@@ -1082,12 +1613,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final s = tvScale(context);
+    final p = Pal.of(context);
     final it = widget.item;
     final overview = (_meta?.overview ?? '').trim();
     return MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      data: MediaQuery.of(context).copyWith(textScaler: uiTextScaler()),
       child: Scaffold(
-        backgroundColor: kTvBg,
+        backgroundColor: p.bg,
         body: Stack(
           fit: StackFit.expand,
           children: [
@@ -1098,12 +1630,12 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                 cacheWidth: 1280,
                 errorBuilder: (c, e, st) => const SizedBox.shrink(),
               ),
-            const DecoratedBox(
+            DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: AlignmentDirectional.centerStart,
                   end: AlignmentDirectional.centerEnd,
-                  colors: [Color(0xF0070B14), Color(0x33070B14)],
+                  colors: [p.base.withValues(alpha: 0.94), p.base.withValues(alpha: 0.2)],
                 ),
               ),
             ),
@@ -1121,7 +1653,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              fontSize: 44 * s, fontWeight: FontWeight.w800, color: Colors.white)),
+                              fontSize: 44 * s, fontWeight: FontWeight.w800, color: p.text)),
                       SizedBox(height: 10 * s),
                       BadgeRow(item: it),
                       if (overview.isNotEmpty) ...[
@@ -1129,7 +1661,7 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                         Text(overview,
                             maxLines: 6,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 20 * s, height: 1.4, color: Colors.white70)),
+                            style: TextStyle(fontSize: 20 * s, height: 1.4, color: p.muted)),
                       ],
                       SizedBox(height: 20 * s),
                       Row(
@@ -1145,11 +1677,13 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           ListenableBuilder(
                             listenable: store,
                             builder: (c, _) => TvButton(
-                              label: t('Favorites'),
+                              label: store.isFavorite(it)
+                                  ? t('Remove from favorites')
+                                  : t('Add to favorites'),
                               icon: store.isFavorite(it)
                                   ? Icons.favorite_rounded
                                   : Icons.favorite_border_rounded,
-                              onTap: () => store.toggleFavorite(it),
+                              onTap: () => toggleFavoriteWithToast(context, it),
                             ),
                           ),
                         ],

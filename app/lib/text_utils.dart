@@ -29,6 +29,9 @@ class LiveName {
 
   static String clean(String s) {
     var t = prefixSplit(s).rest;
+    // "(1080)", "(720p)", "(HEVC)", "()" are noise in a channel name.
+    t = t.replaceAll(
+        RegExp(r'\(\s*(?:\d{3,4}p?|4k|fhd|uhd|hd|sd|hevc|h265)?\s*\)', caseSensitive: false), ' ');
     t = t.replaceAll(RegExp(r'\b(4k|uhd|fhd|hd|sd|hevc|h265)\b', caseSensitive: false), ' ');
     t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
     return t.isEmpty ? s : t;
@@ -104,3 +107,23 @@ extension ItemDisplay on Item {
     return out;
   }
 }
+
+final RegExp _arDiacritics = RegExp('[\u064B-\u065F\u0670\u0640]');
+final RegExp _arAlef = RegExp('[\u0623\u0625\u0622\u0671]');
+final RegExp _nonWord = RegExp(r'[^\p{L}\p{N}]+', unicode: true);
+
+/// Case-insensitive search key that ignores Arabic diacritics and common letter variants
+/// (alef forms, ya/alef-maqsura, ta-marbuta) so "أطفال" and "اطفال" match.
+String normalizeSearch(String s) {
+  var t = s.toLowerCase();
+  t = t.replaceAll(_arDiacritics, '');
+  t = t.replaceAll(_arAlef, '\u0627');
+  t = t.replaceAll('\u0649', '\u064A').replaceAll('\u0629', '\u0647');
+  t = t.replaceAll('\u0624', '\u0648').replaceAll('\u0626', '\u064A');
+  return t.replaceAll(_nonWord, ' ').trim();
+}
+
+final Expando<String> _searchKeys = Expando<String>();
+
+/// Normalized "name + group" for an item, computed once per item.
+String searchKey(Item i) => _searchKeys[i] ??= normalizeSearch('${i.name} ${i.group}');
