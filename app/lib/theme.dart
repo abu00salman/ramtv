@@ -59,16 +59,18 @@ class Palette {
       case AppAccent.cyan:
         return dark ? const Color(0xFF22D3EE) : const Color(0xFF0E7490);
       case AppAccent.indigo:
-        return dark ? const Color(0xFF6366F1) : const Color(0xFF4338CA);
+        return dark ? const Color(0xFF5F62F0) : const Color(0xFF4338CA);
     }
   }
 
   /// White or near-black text, whichever contrasts more with the accent (always at least 4.5:1).
   static Color onAccentFor(Color c) {
+    const ink = Color(0xFF0B0B0B);
     final l = c.computeLuminance();
     final white = 1.05 / (l + 0.05);
-    final dark = (l + 0.05) / 0.05;
-    return white >= dark ? Colors.white : const Color(0xFF0B0B0B);
+    // Measure the near-black actually used, not pure black, or mid blues pick ink below 4.5:1.
+    final dark = (l + 0.05) / (ink.computeLuminance() + 0.05);
+    return white >= dark ? Colors.white : ink;
   }
 
   factory Palette.night(AppAccent a) => Palette(
