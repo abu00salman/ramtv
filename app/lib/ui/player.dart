@@ -766,6 +766,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // ------------------------------------------------------------ back / keys
 
+  /// The on-screen back button always leaves the player. (The remote's Back key keeps its
+  /// step-by-step behavior in [_onBack]: close menu, close list, hide controls, then leave.)
+  void _leave() {
+    Navigator.of(context).pop();
+  }
+
   void _onBack() {
     if (_menu != null) {
       _closeMenu();
@@ -1179,7 +1185,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 node: _n('back'),
                 icon: Icons.arrow_back_rounded,
                 s: s,
-                onTap: _onBack,
+                onTap: _leave,
               ),
               SizedBox(width: 14 * s),
               if (live && req.item != null) ...[

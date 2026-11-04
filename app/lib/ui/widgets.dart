@@ -351,6 +351,43 @@ class LiveBadge extends StatelessWidget {
   }
 }
 
+/// Heart on a card: one click or tap toggles the favorite. It is not focusable, so remote navigation
+/// is unchanged (on a TV it appears only once an item is a favorite; the remote uses a long press on OK).
+class FavHeart extends StatelessWidget {
+  final Item item;
+  final double size;
+  const FavHeart({super.key, required this.item, this.size = 30});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final fav = store.isFavorite(item);
+        if (DeviceProfile.isTelevision && !fav) return const SizedBox.shrink();
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => toggleFavoriteWithToast(context, item),
+          child: Tooltip(
+            message: fav ? t('Remove from favorites') : t('Add to favorites'),
+            child: Container(
+              width: size,
+              height: size,
+              decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
+              child: Icon(
+                fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                size: size * 0.6,
+                color: fav ? p.accent : Colors.white,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class PosterCard extends StatelessWidget {
   final Item item;
   final TapCb onTap;
@@ -381,17 +418,7 @@ class PosterCard extends StatelessWidget {
                 ArtThumb(item: item, fit: live),
                 if (live)
                   const PositionedDirectional(top: 6, end: 6, child: LiveBadge()),
-                if (store.isFavorite(item))
-                  PositionedDirectional(
-                    top: 6,
-                    start: 6,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                          color: Color(0x99000000), shape: BoxShape.circle),
-                      child: Icon(Icons.favorite_rounded, size: 16, color: Pal.current.accent),
-                    ),
-                  ),
+                PositionedDirectional(top: 6, start: 6, child: FavHeart(item: item, size: 30)),
                 if (frac != null)
                   Align(
                     alignment: Alignment.bottomCenter,

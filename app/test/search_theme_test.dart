@@ -64,6 +64,41 @@ void main() {
     }
   });
 
+  test('every accent is visible on every background and its label is readable', () {
+    expect(AppAccent.values.length, greaterThanOrEqualTo(10));
+    for (final a in AppAccent.values) {
+      for (final pal in [Palette.night(a), Palette.black(a), Palette.glass(a), Palette.day(a)]) {
+        expect(_contrast(pal.accent, pal.base), greaterThan(3), reason: '$a on ${pal.base}');
+        expect(_contrast(pal.onAccent, pal.accent), greaterThan(4.5), reason: '$a label');
+      }
+    }
+  });
+
+  test('navigation style, interface size and top margin persist and are clamped', () async {
+    final p = await SharedPreferences.getInstance();
+    final c = ThemeController()..load(p);
+    expect(c.navStyle, 'side');
+    expect(c.sizeFactor, 1.0);
+    expect(c.topInset, 0);
+    await c.setNavStyle('dock');
+    await c.setSizeFactor(1.15);
+    await c.setTopInset(32);
+    final again = ThemeController()..load(p);
+    expect(again.navStyle, 'dock');
+    expect(again.sizeFactor, 1.15);
+    expect(again.topInset, 32);
+    await p.setString('ui.nav', 'unknown');
+    await p.setDouble('ui.size', 9);
+    await p.setDouble('ui.inset', -5);
+    final bad = ThemeController()..load(p);
+    expect(bad.navStyle, 'side');
+    expect(bad.sizeFactor, 1.4);
+    expect(bad.topInset, 0);
+    await again.resetAll();
+    expect(again.navStyle, 'side');
+    expect(again.sizeFactor, 1.0);
+  });
+
   test('OK key: one action per press, long press only after holding', () async {
     var taps = 0;
     var longs = 0;

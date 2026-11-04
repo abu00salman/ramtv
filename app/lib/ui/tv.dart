@@ -422,43 +422,382 @@ class _TvShellState extends State<TvShell> {
   @override
   Widget build(BuildContext context) {
     final p = Pal.of(context);
-    // The sidebar is the first child: it sits on the right in Arabic (RTL) and on the left in English.
+    final s = tvScale(context);
+    final style = themeController.navStyle;
+    void select(int i) => setState(() => _index = i);
+    Widget navFocus(Widget child) => Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onFocusChange: (f) => _sideFocused = f,
+          child: child,
+        );
+    // Page area. With the floating dock the page keeps free space at the bottom for it.
+    final page = Stack(
+      children: [
+        Padding(
+          padding: EdgeInsets.only(bottom: style == 'dock' ? 84 * s : 0),
+          child: _page(),
+        ),
+        ListenableBuilder(
+          listenable: store,
+          builder: (context, _) => store.loading
+              ? const Align(
+                  alignment: Alignment.topCenter,
+                  child: LinearProgressIndicator(minHeight: 3))
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+    final Widget body;
+    if (style == 'top') {
+      body = Column(
+        children: [
+          navFocus(_TvTopNav(index: _index, nodes: _navNodes, onSelect: select, s: s)),
+          Expanded(child: page),
+        ],
+      );
+    } else if (style == 'dock') {
+      body = Stack(
+        children: [
+          Column(
+            children: [
+              _TvTopBar(s: s, brand: true, avatar: true),
+              Expanded(child: page),
+            ],
+          ),
+          PositionedDirectional(
+            bottom: 14 * s,
+            start: 0,
+            end: 0,
+            child: Center(
+              child: navFocus(_TvDock(index: _index, nodes: _navNodes, onSelect: select, s: s)),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // The sidebar is the first child: it sits on the right in Arabic (RTL) and on the left in English.
+      body = Row(
+        children: [
+          navFocus(_TvSidebar(index: _index, nodes: _navNodes, onSelect: select)),
+          Expanded(
+            child: Column(
+              children: [
+                _TvTopBar(s: s, brand: false, avatar: false),
+                Expanded(child: page),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) _onBack();
       },
-      child: Scaffold(
-        backgroundColor: p.bg,
-        body: Row(
+      child: Scaffold(backgroundColor: p.bg, body: body),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- Navigation chrome
+
+const List<IconData> _navIcons = [
+  Icons.home_rounded,
+  Icons.desktop_windows_rounded,
+  Icons.movie_filter_rounded,
+  Icons.theaters_rounded,
+  Icons.favorite_border_rounded,
+  Icons.settings_outlined,
+];
+
+List<String> _navLabels() => [
+      t('Home'),
+      t('Channels'),
+      t('Movies'),
+      t('Series'),
+      t('Favorites'),
+      t('Settings'),
+    ];
+
+String _clockText() {
+  final n = DateTime.now();
+  return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
+}
+
+class _TvClock extends StatefulWidget {
+  final double s;
+  const _TvClock({required this.s});
+
+  @override
+  State<_TvClock> createState() => _TvClockState();
+}
+
+class _TvClockState extends State<_TvClock> {
+  Timer? _timer;
+  String _text = _clockText();
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 20), (_) {
+      final v = _clockText();
+      if (mounted && v != _text) setState(() => _text = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(_text,
+        style: TextStyle(
+            fontSize: 20 * widget.s, fontWeight: FontWeight.w600, color: Pal.of(context).text));
+  }
+}
+
+class _TvBrand extends StatelessWidget {
+  final double s;
+  const _TvBrand({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10 * s),
+          child: Image.asset('assets/icon.png', width: 36 * s, height: 36 * s, cacheWidth: 128),
+        ),
+        SizedBox(width: 10 * s),
+        Text('RaM tv',
+            style: TextStyle(fontSize: 24 * s, fontWeight: FontWeight.w800, color: p.text)),
+      ],
+    );
+  }
+}
+
+/// Search is available from every page (it used to exist only on Home).
+class _TvSearchPill extends StatelessWidget {
+  final double s;
+  final bool compact;
+  const _TvSearchPill({required this.s, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return TvFocusable(
+      radius: 26 * s,
+      onTap: () => Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const SearchPage())),
+      builder: (c, f) => Container(
+        padding: EdgeInsets.symmetric(horizontal: (compact ? 14 : 22) * s, vertical: 10 * s),
+        decoration: BoxDecoration(
+          color: f ? p.text.withValues(alpha: 0.1) : p.surface,
+          borderRadius: BorderRadius.circular(26 * s),
+          border: Border.all(color: p.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Focus(
-              canRequestFocus: false,
-              skipTraversal: true,
-              onFocusChange: (f) => _sideFocused = f,
-              child: _TvSidebar(
-                index: _index,
-                nodes: _navNodes,
-                onSelect: (i) => setState(() => _index = i),
-              ),
-            ),
-            Expanded(
-              child: Stack(
-                children: [
-                  _page(),
-                  ListenableBuilder(
-                    listenable: store,
-                    builder: (context, _) => store.loading
-                        ? const Align(
-                            alignment: Alignment.topCenter,
-                            child: LinearProgressIndicator(minHeight: 3))
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-            ),
+            Icon(Icons.search_rounded, size: 24 * s, color: p.text),
+            if (!compact) ...[
+              SizedBox(width: 10 * s),
+              Text(t('Search'), style: TextStyle(fontSize: 18 * s, color: p.muted)),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TvStatusButton extends StatelessWidget {
+  final double s;
+  const _TvStatusButton({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return ListenableBuilder(
+      listenable: store,
+      builder: (c, _) => TvFocusable(
+        radius: 26 * s,
+        onTap: () => showStatusPanel(context),
+        builder: (c2, f) => Container(
+          padding: EdgeInsets.all(3 * s),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: f ? p.text : Colors.transparent, width: 2),
+          ),
+          child: _Avatar(size: 38 * s, dot: _connectionColor()),
+        ),
+      ),
+    );
+  }
+}
+
+/// Slim bar above every page: search, clock and (optionally) brand and connection status.
+class _TvTopBar extends StatelessWidget {
+  final double s;
+  final bool brand;
+  final bool avatar;
+  const _TvTopBar({required this.s, required this.brand, required this.avatar});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(36 * s, 12 * s, 36 * s, 4 * s),
+      child: Row(
+        children: [
+          if (brand) ...[_TvBrand(s: s), SizedBox(width: 22 * s)],
+          _TvSearchPill(s: s),
+          const Spacer(),
+          _TvClock(s: s),
+          if (avatar) ...[SizedBox(width: 14 * s), _TvStatusButton(s: s)],
+        ],
+      ),
+    );
+  }
+}
+
+/// One navigation entry for the top bar and the dock: the open section shows icon + label,
+/// the others show an icon (and the label while focused or hovered).
+Widget _navPill(BuildContext context,
+    {required int i,
+    required int index,
+    required List<FocusNode> nodes,
+    required ValueChanged<int> onSelect,
+    required double s}) {
+  final p = Pal.of(context);
+  final label = _navLabels()[i];
+  return Tooltip(
+    message: label,
+    child: TvFocusable(
+      focusNode: nodes[i],
+      radius: 24 * s,
+      onTap: () => onSelect(i),
+      builder: (c, focused) {
+        final selected = i == index;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          height: 46 * s,
+          padding: EdgeInsets.symmetric(horizontal: 14 * s),
+          decoration: BoxDecoration(
+            color: selected
+                ? p.accent
+                : (focused ? p.text.withValues(alpha: 0.1) : Colors.transparent),
+            borderRadius: BorderRadius.circular(24 * s),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_navIcons[i], size: 24 * s, color: selected ? p.onAccent : p.text),
+              if (selected || focused) ...[
+                SizedBox(width: 8 * s),
+                Text(label,
+                    maxLines: 1,
+                    style: TextStyle(
+                        fontSize: 18 * s,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? p.onAccent : p.text)),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+/// Navigation style "top": brand, a centered pill with the sections, search, clock and status.
+class _TvTopNav extends StatelessWidget {
+  final int index;
+  final List<FocusNode> nodes;
+  final ValueChanged<int> onSelect;
+  final double s;
+  const _TvTopNav(
+      {required this.index, required this.nodes, required this.onSelect, required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(28 * s, 12 * s, 28 * s, 6 * s),
+      child: Row(
+        children: [
+          _TvBrand(s: s),
+          SizedBox(width: 20 * s),
+          Expanded(
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Container(
+                  padding: EdgeInsets.all(5 * s),
+                  decoration: BoxDecoration(
+                    color: p.panel,
+                    borderRadius: BorderRadius.circular(30 * s),
+                    border: Border.all(color: p.border),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var i = 0; i < _navIcons.length; i++)
+                        _navPill(context,
+                            i: i, index: index, nodes: nodes, onSelect: onSelect, s: s),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 16 * s),
+          _TvSearchPill(s: s, compact: true),
+          SizedBox(width: 14 * s),
+          _TvClock(s: s),
+          SizedBox(width: 14 * s),
+          _TvStatusButton(s: s),
+        ],
+      ),
+    );
+  }
+}
+
+/// Navigation style "dock": a floating rounded bar at the bottom of the screen.
+class _TvDock extends StatelessWidget {
+  final int index;
+  final List<FocusNode> nodes;
+  final ValueChanged<int> onSelect;
+  final double s;
+  const _TvDock(
+      {required this.index, required this.nodes, required this.onSelect, required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Pal.of(context);
+    return Container(
+      padding: EdgeInsets.all(7 * s),
+      decoration: BoxDecoration(
+        color: p.panelSolid.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(34 * s),
+        border: Border.all(color: p.border),
+        boxShadow: [
+          BoxShadow(
+              color: const Color(0x66000000), blurRadius: 24 * s, offset: Offset(0, 8 * s)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < _navIcons.length; i++)
+            _navPill(context, i: i, index: index, nodes: nodes, onSelect: onSelect, s: s),
+        ],
       ),
     );
   }
@@ -885,53 +1224,18 @@ class _HeroSectionState extends State<_HeroSection> {
               ),
             ),
           ),
-          // top bar: search pill (start) and clock + avatar (end)
-          PositionedDirectional(
-            top: 18 * s,
-            start: 40 * s,
-            end: 40 * s,
-            child: Row(
-              children: [
-                TvFocusable(
-                  radius: 26 * s,
-                  onTap: () => Navigator.of(context)
-                      .push(MaterialPageRoute(builder: (_) => const SearchPage())),
-                  builder: (c, f) => Container(
-                    padding: EdgeInsets.symmetric(horizontal: 22 * s, vertical: 10 * s),
-                    decoration: BoxDecoration(
-                      color: p.panel.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(26 * s),
-                      border: Border.all(color: p.border),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.search_rounded, size: 24 * s, color: p.text),
-                        SizedBox(width: 10 * s),
-                        Text(t('Search'),
-                            style: TextStyle(fontSize: 18 * s, color: p.muted)),
-                      ],
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(widget.time,
-                    style: TextStyle(
-                        fontSize: 20 * s, fontWeight: FontWeight.w600, color: p.text)),
-                SizedBox(width: 14 * s),
-                ListenableBuilder(
-                  listenable: store,
-                  builder: (c, _) => _Avatar(size: 40 * s, dot: _connectionColor()),
-                ),
-              ],
-            ),
-          ),
           if (it != null)
             PositionedDirectional(
               start: 40 * s,
+              top: 12 * s,
               bottom: 22 * s,
               width: MediaQuery.of(context).size.width * 0.42,
-              child: Column(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.bottomStart,
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.42,
+                  child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -972,6 +1276,8 @@ class _HeroSectionState extends State<_HeroSection> {
                     ],
                   ),
                 ],
+              ),
+                ),
               ),
             ),
         ],
@@ -1175,6 +1481,11 @@ class _ChannelCard extends StatelessWidget {
                   ),
                 ),
               PositionedDirectional(
+                top: 6 * s,
+                start: 6 * s,
+                child: FavHeart(item: item, size: 28 * s),
+              ),
+              PositionedDirectional(
                 start: 10 * s,
                 end: 10 * s,
                 bottom: 8 * s,
@@ -1366,7 +1677,9 @@ class _ItemDetailsScreenState extends State<ItemDetailsScreen> {
                           ListenableBuilder(
                             listenable: store,
                             builder: (c, _) => TvButton(
-                              label: t('Favorites'),
+                              label: store.isFavorite(it)
+                                  ? t('Remove from favorites')
+                                  : t('Add to favorites'),
                               icon: store.isFavorite(it)
                                   ? Icons.favorite_rounded
                                   : Icons.favorite_border_rounded,

@@ -82,6 +82,18 @@ class _RamTvAppState extends State<RamTvApp> with WidgetsBindingObserver {
             child: content,
           );
         }
+        final inset = themeController.topInset;
+        if (inset > 0) {
+          // Some head units draw their status bar over the app: keep content below it.
+          final m = MediaQuery.of(context);
+          content = Padding(
+            padding: EdgeInsets.only(top: inset),
+            child: MediaQuery(
+              data: m.copyWith(size: Size(m.size.width, (m.size.height - inset).clamp(1.0, m.size.height).toDouble())),
+              child: content,
+            ),
+          );
+        }
         if (palette.glass) {
           content = Stack(
             children: [const Positioned.fill(child: GlassBackground()), content],
