@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
 import 'store.dart';
+import 'desktop_window.dart';
 import 'device_profile.dart';
 import 'perf.dart';
 import 'theme.dart';
@@ -11,6 +12,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   Perf.startFrameMonitor();
   MediaKit.ensureInitialized();
+  await DesktopWindow.init();
   await DeviceProfile.initialize();
   await store.init();
   themeController.load(store.prefs);

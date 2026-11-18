@@ -148,6 +148,8 @@ const Map<String, String> _ar = {
   'Added to favorites': 'تمت الإضافة إلى المفضلة',
   'Removed from favorites': 'تمت الإزالة من المفضلة',
   'Retry': 'إعادة المحاولة',
+  'Full screen': 'ملء الشاشة',
+  'Exit full screen': 'الخروج من ملء الشاشة',
   'Off': 'إيقاف',
   'Auto': 'تلقائي',
   'Quality': 'الجودة',

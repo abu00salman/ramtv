@@ -20,6 +20,7 @@ dependencies:
   path_provider: ^2.1.2
   wakelock_plus: ^1.2.4
   qr_flutter: ^4.1.0
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:

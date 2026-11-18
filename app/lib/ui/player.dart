@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import '../desktop_window.dart';
 import '../epg.dart';
 import '../models.dart';
 import '../perf.dart';
@@ -62,7 +63,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoController controller;
   late PlayRequest req;
   final GlobalKey _videoKey = GlobalKey();
-  VideoState? _videoState;
 
   final FocusNode _rootFocus = FocusNode();
   final Map<String, FocusNode> _nodes = {};
@@ -806,6 +806,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     final repeat = e is KeyRepeatEvent;
 
+    // Desktop: F / F11 toggle full screen, Esc leaves it before anything else.
+    if (_isDesktop && !_searching) {
+      if (!repeat &&
+          (k == LogicalKeyboardKey.f11 || k == LogicalKeyboardKey.keyF)) {
+        _toggleFullScreen();
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.escape) {
+        if (repeat) return KeyEventResult.handled;
+        if (DesktopWindow.isFullScreen) {
+          _setFullScreen(false);
+        } else {
+          _onBack();
+        }
+        return KeyEventResult.handled;
+      }
+    }
+
     // Hardware media keys work in every state.
     if (k == LogicalKeyboardKey.mediaPlayPause ||
         k == LogicalKeyboardKey.space) {
@@ -910,15 +928,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
           .length >
       1;
 
+  void _toggleFullScreen() => _setFullScreen(!DesktopWindow.isFullScreen);
+
+  void _setFullScreen(bool value) {
+    unawaited(DesktopWindow.setFullScreen(value).then((_) {
+      if (mounted) setState(() {});
+    }));
+  }
+
   bool get _isDesktop =>
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.macOS ||
       defaultTargetPlatform == TargetPlatform.linux;
 
-  Widget _captureVideoState(VideoState state) {
-    _videoState = state;
-    return const SizedBox.shrink();
-  }
+  // The player draws its own controls; media_kit's are not used.
+  Widget _captureVideoState(VideoState state) => const SizedBox.shrink();
 
   @override
   Widget build(BuildContext context) {
@@ -1095,8 +1119,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       onDoubleTapDown: (d) => _tapX = d.localPosition.dx,
       onDoubleTap: () {
         if (_isDesktop) {
-          final st = _videoState;
-          if (st != null) toggleFullscreen(st.context);
+          _toggleFullScreen();
         } else if (_canSeek) {
           _seekAccumulate(_tapX < size.width / 2 ? -1 : 1, repeat: false);
         }
@@ -1474,12 +1497,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (_isDesktop)
         _PBtn(
           node: _n('fullscreen'),
-          icon: Icons.fullscreen_rounded,
+          icon: DesktopWindow.isFullScreen
+              ? Icons.fullscreen_exit_rounded
+              : Icons.fullscreen_rounded,
+          label: t(DesktopWindow.isFullScreen ? 'Exit full screen' : 'Full screen'),
           s: s,
-          onTap: () {
-            final st = _videoState;
-            if (st != null) toggleFullscreen(st.context);
-          },
+          onTap: _toggleFullScreen,
         ),
     ];
     return Wrap(
