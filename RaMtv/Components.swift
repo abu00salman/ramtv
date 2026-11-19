@@ -48,7 +48,7 @@ struct ShelfView: View {
     var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text(title).font(.title3.weight(.bold)).padding(.horizontal, 16)
+                ShelfHeader(title: title, items: items)
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 12) {
                         ForEach(items) { PosterCard(item: $0) }

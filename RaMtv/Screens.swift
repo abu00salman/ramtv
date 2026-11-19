@@ -5,14 +5,30 @@ struct RootView: View {
     @State private var selectedTab = 0
     @EnvironmentObject var store: AppStore
 
-    var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeView().tabItem { Label(t("Home"), systemImage: "house.fill") }.tag(0)
-            LiveView().tabItem { Label(t("Live"), systemImage: "antenna.radiowaves.left.and.right") }.tag(1)
-            LibraryView().tabItem { Label(t("Library"), systemImage: "film.stack") }.tag(2)
-            SearchView().tabItem { Label(t("Search"), systemImage: "magnifyingglass") }.tag(3)
-            SettingsView().tabItem { Label(t("Settings"), systemImage: "gearshape.fill") }.tag(4)
+    /// iOS 18+: the iPad tab bar can open as a sidebar (Apple TV style), and Search is its own tab.
+    @ViewBuilder private var tabs: some View {
+        if #available(iOS 18.0, *) {
+            TabView(selection: $selectedTab) {
+                Tab(t("Home"), systemImage: "house.fill", value: 0) { HomeView() }
+                Tab(t("Live"), systemImage: "antenna.radiowaves.left.and.right", value: 1) { LiveView() }
+                Tab(t("Library"), systemImage: "film.stack", value: 2) { LibraryView() }
+                Tab(t("Settings"), systemImage: "gearshape.fill", value: 4) { SettingsView() }
+                Tab(value: 3, role: .search) { SearchView() }
+            }
+            .tabViewStyle(.sidebarAdaptable)
+        } else {
+            TabView(selection: $selectedTab) {
+                HomeView().tabItem { Label(t("Home"), systemImage: "house.fill") }.tag(0)
+                LiveView().tabItem { Label(t("Live"), systemImage: "antenna.radiowaves.left.and.right") }.tag(1)
+                LibraryView().tabItem { Label(t("Library"), systemImage: "film.stack") }.tag(2)
+                SearchView().tabItem { Label(t("Search"), systemImage: "magnifyingglass") }.tag(3)
+                SettingsView().tabItem { Label(t("Settings"), systemImage: "gearshape.fill") }.tag(4)
+            }
         }
+    }
+
+    var body: some View {
+        tabs
         .id(language)
         .environment(\.locale, (AppLanguage(rawValue: language) ?? .system).locale)
         .environment(\.layoutDirection, (AppLanguage(rawValue: language) ?? .system).isArabic ? .rightToLeft : .leftToRight)
@@ -48,8 +64,8 @@ struct HomeView: View {
                     EmptyStateView()
                 } else {
                     VStack(alignment: .leading, spacing: 26) {
-                        if let hero = store.heroItem { HeroView(item: hero) }
-                        ShelfView(title: t("Continue Watching"), items: store.recents.filter { $0.kind != .live })
+                        FeaturedCarousel(items: store.featuredItems)
+                        ContinueShelf(items: store.recents.filter { $0.kind != .live })
                         ShelfView(title: t("Recent Channels"), items: store.recents.filter { $0.kind == .live })
                         ShelfView(title: t("Favorites"), items: store.favorites.isEmpty ? [] : store.favoriteItems)
                         ShelfView(title: t("Movies"), items: Array(store.movies.prefix(24)))

@@ -45,6 +45,23 @@ final class AppStore: ObservableObject {
 
     var canStep: Bool { queue.count > 1 || epQueue.count > 1 }
 
+    /// Up to eight titles for the rotating hero: what you were watching first, then titles with artwork.
+    var featuredItems: [Item] {
+        var seen = Set<String>()
+        var out: [Item] = []
+        let pool = recents.filter { $0.kind != .live }
+            + movies.prefix(60).filter { $0.logo != nil }
+            + series.prefix(60).filter { $0.logo != nil }
+        for i in pool where out.count < 8 && seen.insert(i.id).inserted { out.append(i) }
+        if out.isEmpty, let h = heroItem { out = [h] }
+        return out
+    }
+
+    func removeFromRecents(_ item: Item) {
+        recents.removeAll { $0.id == item.id }
+        if let d = try? JSONEncoder().encode(recents) { defaults.set(d, forKey: "recents") }
+    }
+
     var heroItem: Item? {
         recents.first
             ?? movies.first(where: { $0.logo != nil && $0.url != nil })
