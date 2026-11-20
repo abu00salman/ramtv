@@ -34,7 +34,11 @@ private let arabic: [String: String] = [
     "RaM tv is a player only. It does not provide or include any channels, playlists or content. Use only sources you are authorized to access.":
         "RaM tv مشغّل فقط. لا يقدّم ولا يتضمن أي قنوات أو قوائم أو محتوى. استخدم مصادر مصرّحاً لك بها فقط.",
     "Search channels, movies, series": "ابحث في القنوات والأفلام والمسلسلات",
-    "Mark as watched": "تمت المشاهدة", "Remove from Continue Watching": "إزالة من متابعة المشاهدة"
+    "Mark as watched": "تمت المشاهدة", "Remove from Continue Watching": "إزالة من متابعة المشاهدة",
+    "Retry": "إعادة المحاولة",
+    "No connection to the server. Check your internet and try again.": "لا يوجد اتصال بالسيرفر. تحقق من الإنترنت ثم أعد المحاولة.",
+    "The server refused this link. Check your subscription or login.": "رفض السيرفر هذا الرابط. تحقق من الاشتراك أو بيانات الدخول.",
+    "This link no longer exists on the server.": "هذا الرابط لم يعد موجودًا على السيرفر."
 ]
 
 enum AppLanguage: String, CaseIterable, Identifiable {

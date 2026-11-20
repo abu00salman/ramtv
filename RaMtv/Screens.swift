@@ -90,6 +90,7 @@ struct ChannelRow: View {
     @EnvironmentObject var store: AppStore
     let item: Item
     let onTap: () -> Void
+    @State private var onAir: EpgEntry?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -106,7 +107,15 @@ struct ChannelRow: View {
                             .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
                 }
-                Text(item.group).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if let p = onAir {
+                    Text(p.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    ProgressView(value: p.progress())
+                        .tint(Color.ram)
+                        .frame(maxWidth: 140)
+                        .scaleEffect(x: 1, y: 0.6, anchor: .center)
+                } else {
+                    Text(item.group).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer()
             Button { store.toggleFavorite(item) } label: {
@@ -117,6 +126,7 @@ struct ChannelRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
+        .task(id: item.id) { onAir = await store.nowNext(for: item).now }
     }
 }
 

@@ -136,10 +136,43 @@ struct PlayerScreen: View {
     @State private var engine: Engine
     @State private var showChrome = true
     @State private var showList = false
+    @State private var probing: Bool
+    @State private var onAir: EpgEntry?
+    @State private var errorText: String?
 
     init(req: PlayRequest) {
         _req = State(initialValue: req)
         _engine = State(initialValue: Engine.initial(for: req))
+        _probing = State(initialValue: StreamProbe.needsProbe(req))
+    }
+
+    /// Reads the first 2 KB of links with an unclear type and picks the engine that can play them.
+    private func probeIfNeeded() async {
+        let r = req
+        guard StreamProbe.needsProbe(r) else { probing = false; return }
+        probing = true
+        let outcome = await StreamProbe.probe(r.url)
+        guard !Task.isCancelled, r.id == req.id else { return }
+        if let msg = PlaybackMessage.text(for: outcome) {
+            errorText = msg
+        } else if case .kind(let kind) = outcome {
+            engine = Engine.after(probe: kind, for: r)
+        }
+        probing = false
+    }
+
+    private var errorView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle)
+            Text(errorText ?? "").multilineTextAlignment(.center).font(.headline)
+            Button(t("Retry")) {
+                errorText = nil
+                Task { await probeIfNeeded() }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .foregroundStyle(.white)
+        .padding(32)
     }
 
     private var isAV: Bool {
@@ -151,11 +184,17 @@ struct PlayerScreen: View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
             Group {
+                if errorText != nil {
+                    errorView
+                } else if probing {
+                    ProgressView().tint(.white).controlSize(.large)
+                } else {
                 switch engine {
                 case .av(let url, let fb):
                     AVPlayerScreen(
                         url: url,
                         resumeKey: req.resumeKey,
+                        isLive: req.isLive,
                         onReady: { if url != fb { EnginePrefs.recordAVSuccess(host: fb.host) } },
                         onFail: {
                             if url != fb { EnginePrefs.recordAVFailure(host: fb.host) }
@@ -167,8 +206,10 @@ struct PlayerScreen: View {
                     VLCPlayerView(url: url, isLive: req.isLive, resumeKey: req.resumeKey,
                                   showChrome: $showChrome, onEnded: { ended() })
                 }
+                }
             }
             .id(req.id)
+            .task(id: req.id) { await probeIfNeeded() }
             topBar
         }
         .tint(.white)
@@ -186,6 +227,8 @@ struct PlayerScreen: View {
     private func switchTo(_ r: PlayRequest) {
         req = r
         engine = Engine.initial(for: r)
+        probing = StreamProbe.needsProbe(r)
+        errorText = nil
         showChrome = true
     }
 
@@ -233,15 +276,25 @@ struct PlayerScreen: View {
                 }
                 .accessibilityLabel(t("Apple player"))
             }
-            Text(req.title)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .shadow(radius: 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, isAV ? 120 : 0)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(req.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if let p = onAir {
+                    Text(p.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            .shadow(radius: 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, isAV ? 120 : 0)
+            .task(id: req.id) {
+                onAir = nil
+                if req.isLive, let item = req.item { onAir = await store.nowNext(for: item).now }
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        // Apple's player draws its own buttons in the top row; sit below them.
+        .padding(.top, isAV ? 64 : 8)
         .opacity(isAV || showChrome ? 1 : 0)
         .animation(.easeInOut(duration: 0.2), value: showChrome)
     }
@@ -293,6 +346,21 @@ final class AVModel: ObservableObject {
     private var startLogged = false
     private var watchdog: DispatchWorkItem?
     private var playingObs: NSKeyValueObservation?
+    private let isLive: Bool
+    private var failObs: NSObjectProtocol?
+    private var stallObs: NSObjectProtocol?
+    private var stallTimer: DispatchWorkItem?
+    private var resetTimer: DispatchWorkItem?
+    private var pictureCheck: DispatchWorkItem?
+    private var attempts = 0
+    private var gaveUp = false
+
+    /// Live reconnect: at most this many attempts, waiting 1, 2, 4, 8 s.
+    static let maxReconnects = 4
+    static func reconnectDelay(_ attempt: Int) -> TimeInterval { pow(2, Double(max(0, min(attempt, 4) - 1))) }
+
+    /// Shown over the video while reconnecting.
+    @Published var status: String?
 
     /// Records the start outcome once (first frame, failure or timeout).
     private func logStart(_ outcome: String, detail: String = "") {
@@ -308,16 +376,49 @@ final class AVModel: ObservableObject {
         onEndedHandler = onEnded
     }
 
-    init(url: URL, resumeKey: String?,
+    private static func makeItem(_ url: URL, live: Bool) -> AVPlayerItem {
+        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "RaMtv/1.0"]])
+        let item = AVPlayerItem(asset: asset)
+        // Live: keep a moderate buffer ahead; films and episodes: a larger one for stability.
+        item.preferredForwardBufferDuration = live ? 20 : 60
+        return item
+    }
+
+    private func giveUp() {
+        guard !gaveUp else { return }
+        gaveUp = true
+        stallTimer?.cancel()
+        resetTimer?.cancel()
+        status = nil
+        onFailHandler()
+    }
+
+    /// Live only: rebuild the item after a failure or a long stall, a few times, then hand over.
+    private func reconnect() {
+        guard isLive, !gaveUp else { return }
+        stallTimer?.cancel()
+        resetTimer?.cancel()
+        guard attempts < AVModel.maxReconnects else { giveUp(); return }
+        attempts += 1
+        status = t("Reconnecting") + "... (\(attempts)/\(AVModel.maxReconnects))"
+        let n = attempts
+        DispatchQueue.main.asyncAfter(deadline: .now() + AVModel.reconnectDelay(n)) { [weak self] in
+            guard let self = self, !self.gaveUp, self.attempts == n else { return }
+            self.player.replaceCurrentItem(with: AVModel.makeItem(self.url, live: true))
+            self.player.play()
+        }
+    }
+
+    init(url: URL, resumeKey: String?, isLive: Bool = false,
          onReady: @escaping () -> Void, onFail: @escaping () -> Void, onEnded: @escaping () -> Void) {
         self.url = url
+        self.isLive = isLive
         self.onReadyHandler = onReady
         self.onFailHandler = onFail
         self.onEndedHandler = onEnded
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "RaMtv/1.0"]])
-        let item = AVPlayerItem(asset: asset)
+        let item = AVModel.makeItem(url, live: isLive)
         player = AVPlayer(playerItem: item)
         player.allowsExternalPlayback = true
 
@@ -327,9 +428,10 @@ final class AVModel: ObservableObject {
                 if it.status != .unknown { self.watchdog?.cancel() }
                 if it.status == .failed {
                     self.logStart("failed")
-                    self.onFailHandler()
+                    self.giveUp()
                 }
                 if it.status == .readyToPlay {
+                    self.checkPictureSoon()
                     if !self.didResume {
                         self.didResume = true
                         if let key = resumeKey, let r = ResumeStore.get(key), r.seconds > 20 {
@@ -349,15 +451,35 @@ final class AVModel: ObservableObject {
             }
         }
 
-        endObs = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+        endObs = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] note in
+            guard let self = self, (note.object as? AVPlayerItem) === self.player.currentItem else { return }
+            if self.isLive { self.reconnect(); return }
             if let key = resumeKey { ResumeStore.clear(key) }
-            self?.onEndedHandler()
+            self.onEndedHandler()
+        }
+        failObs = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: nil, queue: .main) { [weak self] note in
+            guard let self = self, (note.object as? AVPlayerItem) === self.player.currentItem else { return }
+            if self.isLive { self.reconnect() } else { self.giveUp() }
+        }
+        stallObs = NotificationCenter.default.addObserver(forName: .AVPlayerItemPlaybackStalled, object: nil, queue: .main) { [weak self] note in
+            guard let self = self, self.isLive, (note.object as? AVPlayerItem) === self.player.currentItem else { return }
+            self.stallTimer?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.reconnect() }
+            self.stallTimer = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
         }
         playingObs = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             guard let self = self, p.timeControlStatus == .playing else { return }
             DispatchQueue.main.async {
                 let s = p.currentItem?.presentationSize ?? .zero
                 self.logStart("ok", detail: s.width > 0 ? "\(Int(s.width))×\(Int(s.height))" : "")
+                self.stallTimer?.cancel()
+                self.status = nil
+                // Thirty seconds of clean playback clears the reconnect count.
+                self.resetTimer?.cancel()
+                let reset = DispatchWorkItem { [weak self] in self?.attempts = 0 }
+                self.resetTimer = reset
+                DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: reset)
             }
         }
 
@@ -365,18 +487,38 @@ final class AVModel: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self = self, !self.startLogged else { return }
             self.logStart("timeout")
-            self.onFailHandler()
+            self.giveUp()
         }
         watchdog = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
         player.play()
     }
 
+    /// Sound but no picture a few seconds after "ready" (some HEVC live channels): let VLC try.
+    private func checkPictureSoon() {
+        pictureCheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, let item = self.player.currentItem,
+                  item.status == .readyToPlay, item.presentationSize == .zero else { return }
+            self.logStart("no-video")
+            self.giveUp()
+        }
+        pictureCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+    }
+
     deinit {
         watchdog?.cancel()
+        stallTimer?.cancel()
+        resetTimer?.cancel()
+        pictureCheck?.cancel()
         if let o = timeObs { player.removeTimeObserver(o) }
-        if let e = endObs { NotificationCenter.default.removeObserver(e) }
-        if !PlayerHub.shared.isHolding(player) { player.pause() }
+        for o in [endObs, failObs, stallObs].compactMap({ $0 }) { NotificationCenter.default.removeObserver(o) }
+        if !PlayerHub.shared.isHolding(player) {
+            player.pause()
+            // Drop the item so its network downloads stop at once when the channel changes.
+            player.replaceCurrentItem(with: nil)
+        }
     }
 }
 
@@ -387,10 +529,10 @@ struct AVPlayerScreen: View {
     let onFail: () -> Void
     let onEnded: () -> Void
 
-    init(url: URL, resumeKey: String?,
+    init(url: URL, resumeKey: String?, isLive: Bool = false,
          onReady: @escaping () -> Void, onFail: @escaping () -> Void,
          onEnded: @escaping () -> Void, onPiPStart: @escaping () -> Void) {
-        _model = StateObject(wrappedValue: PlayerHub.shared.reusableModel(for: url) ?? AVModel(url: url, resumeKey: resumeKey,
+        _model = StateObject(wrappedValue: PlayerHub.shared.reusableModel(for: url) ?? AVModel(url: url, resumeKey: resumeKey, isLive: isLive,
                                                    onReady: onReady, onFail: onFail, onEnded: onEnded))
         self.onPiPStart = onPiPStart
         self.onReady = onReady
@@ -401,6 +543,18 @@ struct AVPlayerScreen: View {
     var body: some View {
         AVPlayerView(model: model, onPiPStart: onPiPStart).ignoresSafeArea()
             .onAppear { model.updateHandlers(onReady: onReady, onFail: onFail, onEnded: onEnded) }
+            .overlay {
+                if let s = model.status {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(.white)
+                        Text(s).font(.footnote.weight(.semibold))
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(.black.opacity(0.6), in: Capsule())
+                    .foregroundStyle(.white)
+                    .allowsHitTesting(false)
+                }
+            }
     }
 }
 
@@ -517,7 +671,8 @@ final class VLCModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     private func makeMedia() -> VLCMedia {
         let media = VLCMedia(url: url)
-        media.addOption(":network-caching=1500")
+        // Live starts fast; films and episodes keep a larger cache for steadier playback.
+        media.addOption(isLive ? ":network-caching=1500" : ":network-caching=3000")
         return media
     }
 
